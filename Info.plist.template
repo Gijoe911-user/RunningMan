@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Info.plist pour RunningMan
+    
+    INSTRUCTIONS :
+    1. Ouvrez votre fichier Info.plist dans Xcode
+    2. Vous pouvez soit :
+       a) Ajouter chaque clé manuellement via l'interface Xcode (recommandé pour débutants)
+       b) Ouvrir en mode "Source Code" (clic droit → Open As → Source Code) 
+          et copier-coller les clés ci-dessous entre <dict> et </dict>
+-->
+<plist version="1.0">
+<dict>
+    <!-- ========================================== -->
+    <!-- PERMISSIONS DE LOCALISATION (OBLIGATOIRE) -->
+    <!-- ========================================== -->
+    
+    <!-- Localisation quand l'app est utilisée -->
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>RunningMan utilise votre position pour afficher votre parcours et vous localiser sur la carte pendant vos courses.</string>
+    
+    <!-- Localisation en arrière-plan -->
+    <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+    <string>RunningMan a besoin d'accéder à votre position en arrière-plan pour partager votre position avec votre Squad pendant vos courses.</string>
+    
+    <!-- Localisation permanente (iOS 10 et inférieur) -->
+    <key>NSLocationAlwaysUsageDescription</key>
+    <string>L'accès permanent à la localisation permet de suivre vos courses même quand l'app est en arrière-plan.</string>
+    
+    <!-- ========================================== -->
+    <!-- PERMISSIONS CAMÉRA ET PHOTOS              -->
+    <!-- ========================================== -->
+    
+    <!-- Accès à la caméra -->
+    <key>NSCameraUsageDescription</key>
+    <string>Prenez des photos pendant vos courses pour les partager avec votre Squad.</string>
+    
+    <!-- Accès à la bibliothèque photo (lecture) -->
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Accédez à votre photothèque pour partager des photos avec votre Squad.</string>
+    
+    <!-- Ajout de photos à la bibliothèque -->
+    <key>NSPhotoLibraryAddUsageDescription</key>
+    <string>Sauvegardez les photos de vos courses dans votre photothèque.</string>
+    
+    <!-- ========================================== -->
+    <!-- PERMISSION MICROPHONE (Push-to-Talk)      -->
+    <!-- ========================================== -->
+    
+    <!-- Accès au microphone -->
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Utilisez le microphone pour communiquer avec votre Squad en mode Talkie-Walkie.</string>
+    
+    <!-- ========================================== -->
+    <!-- BACKGROUND MODES                          -->
+    <!-- ========================================== -->
+    
+    <!-- Modes d'arrière-plan autorisés -->
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>location</string>           <!-- Mises à jour de localisation en arrière-plan -->
+        <string>audio</string>               <!-- Audio/TTS en arrière-plan -->
+        <string>fetch</string>               <!-- Récupération de données en arrière-plan -->
+        <string>remote-notification</string> <!-- Notifications push -->
+    </array>
+    
+    <!-- ========================================== -->
+    <!-- PERMISSIONS OPTIONNELLES                  -->
+    <!-- ========================================== -->
+    
+    <!-- Accès aux données de mouvement (podomètre, accéléromètre) -->
+    <key>NSMotionUsageDescription</key>
+    <string>RunningMan utilise les données de mouvement pour détecter votre activité de course et optimiser la batterie.</string>
+    
+    <!-- Accès à HealthKit (lecture) -->
+    <key>NSHealthShareUsageDescription</key>
+    <string>Partagez vos données de course avec HealthKit pour un meilleur suivi de votre santé.</string>
+    
+    <!-- Accès à HealthKit (écriture) -->
+    <key>NSHealthUpdateUsageDescription</key>
+    <string>Enregistrez vos courses dans HealthKit pour un suivi complet de votre activité physique.</string>
+    
+    <!-- ========================================== -->
+    <!-- CONFIGURATION APP TRANSPORT SECURITY      -->
+    <!-- (Si vous utilisez des serveurs non-HTTPS) -->
+    <!-- ========================================== -->
+    <!--
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+    </dict>
+    -->
+    
+</dict>
+</plist>
