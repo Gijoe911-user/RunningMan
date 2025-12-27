@@ -1,5 +1,5 @@
 //
-//  RootView.swift
+//  CoreRootView.swift
 //  RunningMan
 //
 //  Point d'entrée principal qui gère la navigation Auth vs Main

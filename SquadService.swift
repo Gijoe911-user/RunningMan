@@ -14,7 +14,7 @@ class SquadService {
     
     static let shared = SquadService()
     
-    private let db = Firestore.firestore()
+    private lazy var db = Firestore.firestore()
     
     private init() {
         Logger.log("SquadService initialisé", category: .squads)

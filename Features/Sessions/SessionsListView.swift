@@ -9,7 +9,11 @@ import SwiftUI
 import Combine
 
 struct SessionsListView: View {
+    // Récupère le view model des squads depuis l'environnement (Swift macro @Observable déjà utilisée dans ton SquadViewModel)
+    @Environment(SquadViewModel.self) private var squadsVM
+    
     @StateObject private var viewModel = SessionsViewModel()
+    @State private var configuredSquadId: String? = nil
     
     var body: some View {
         NavigationStack {
@@ -24,10 +28,28 @@ struct SessionsListView: View {
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button {
-                        // TODO: Créer une nouvelle session
+                        // TODO: Présenter CreateSessionView si selectedSquad est disponible
+                        // Exemple:
+                        // if let squad = squadsVM.selectedSquad {
+                        //     sheet = .createSession(squad)
+                        // }
                     } label: {
                         Image(systemName: "plus")
                     }
+                }
+            }
+            // Démarre la localisation dès l'arrivée sur l'écran
+            .onAppear {
+                viewModel.startLocationUpdates()
+                viewModel.centerOnUserLocation()
+            }
+            // Configure le contexte (squadId) et écoute la session active
+            .task(id: squadsVM.selectedSquad?.id) {
+                guard let squadId = squadsVM.selectedSquad?.id else { return }
+                // Évite de reconfigurer si déjà fait avec le même squadId
+                if configuredSquadId != squadId {
+                    viewModel.setContext(squadId: squadId)
+                    configuredSquadId = squadId
                 }
             }
         }
@@ -96,5 +118,7 @@ struct RunnerRowView: View {
 }
 
 #Preview {
+    // Pour l’aperçu, on peut injecter un SquadViewModel mock si nécessaire
     SessionsListView()
+        .environment(SquadViewModel())
 }

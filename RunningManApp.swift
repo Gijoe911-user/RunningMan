@@ -22,6 +22,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 struct RunningManApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
     @State private var authViewModel: AuthViewModel
+    @State private var squadViewModel = SquadViewModel()
     
     // Initialise Firebase AVANT la création de authViewModel
     init() {
@@ -37,6 +38,7 @@ struct RunningManApp: App {
         WindowGroup {
             RootView()
                 .environment(authViewModel) // Injection moderne iOS 17+
+                .environment(squadViewModel) // Injection SquadViewModel
                 .preferredColorScheme(.dark)
         }
     }

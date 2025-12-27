@@ -10,6 +10,7 @@ import SwiftUI
 /// Vue de liste de tous les squads de l'utilisateur
 struct SquadListView: View {
     
+    @Environment(SquadViewModel.self) private var squadVM
     @State private var showCreateSquad = false
     @State private var showJoinSquad = false
     
@@ -35,6 +36,9 @@ struct SquadListView: View {
             }
             .navigationTitle("Mes Squads")
             .navigationBarTitleDisplayMode(.large)
+            .refreshable {
+                await squadVM.loadUserSquads()
+            }
             .sheet(isPresented: $showCreateSquad) {
                 CreateSquadView()
             }

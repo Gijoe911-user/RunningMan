@@ -1,5 +1,5 @@
 //
-//  MapView.swift >> FeaturesSessionMapView
+//  MapView.swift
 //  RunningMan
 //
 //  Vue Map avec annotations des coureurs

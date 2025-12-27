@@ -1,5 +1,5 @@
 //
-//  ResourcesColorGuide.swift
+//  ColorGuide.swift
 //  RunningMan
 //
 //  Guide et extensions pour la palette de couleurs Dark Mode néon

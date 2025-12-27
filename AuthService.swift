@@ -15,8 +15,15 @@ class AuthService {
     
     static let shared = AuthService()
     
-    private let auth = Auth.auth()
-    private let db = Firestore.firestore()
+    // Utiliser des computed properties au lieu de stored properties
+    // pour éviter l'initialisation avant FirebaseApp.configure()
+    private var auth: Auth {
+        Auth.auth()
+    }
+    
+    private var db: Firestore {
+        Firestore.firestore()
+    }
     
     private init() {
         Logger.log("AuthService initialisé", category: .auth)

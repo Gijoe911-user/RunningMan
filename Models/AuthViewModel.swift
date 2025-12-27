@@ -41,30 +41,32 @@ class AuthViewModel {
     // MARK: - Initialization
     
     init() {
-        checkAuthState()
+        // Démarrer la vérification d'authentification de manière asynchrone
+        // pour éviter tout problème d'initialisation
+        Task { @MainActor in
+            await checkAuthState()
+        }
     }
     
     // MARK: - Check Auth State
     
     /// Vérifie si un utilisateur est déjà connecté au lancement de l'app
-    func checkAuthState() {
+    func checkAuthState() async {
         isLoading = true
         
-        Task {
-            defer { isLoading = false }
-            
-            guard let userId = authService.currentUserId else {
-                Logger.log("Aucun utilisateur connecté", category: .auth)
-                return
-            }
-            
-            do {
-                currentUser = try await authService.getUserProfile(userId: userId)
-                Logger.logSuccess("Utilisateur reconnecté automatiquement", category: .auth)
-            } catch {
-                Logger.logError(error, context: "checkAuthState", category: .auth)
-                errorMessage = "Erreur lors de la récupération du profil"
-            }
+        defer { isLoading = false }
+        
+        guard let userId = authService.currentUserId else {
+            Logger.log("Aucun utilisateur connecté", category: .auth)
+            return
+        }
+        
+        do {
+            currentUser = try await authService.getUserProfile(userId: userId)
+            Logger.logSuccess("Utilisateur reconnecté automatiquement", category: .auth)
+        } catch {
+            Logger.logError(error, context: "checkAuthState", category: .auth)
+            errorMessage = "Erreur lors de la récupération du profil"
         }
     }
     

@@ -1,5 +1,5 @@
 //
-//  CoreNavigationMainTabView.swift
+//  CoreMainTabView.swift
 //  RunningMan
 //
 //  Navigation principale de l'application

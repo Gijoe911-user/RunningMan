@@ -11,6 +11,7 @@ import SwiftUI
 struct RootView: View {
     
     @Environment(AuthViewModel.self) private var authVM
+    @Environment(SquadViewModel.self) private var squadVM
     
     var body: some View {
         Group {
@@ -29,6 +30,12 @@ struct RootView: View {
             } else {
                 // Non authentifié - Afficher l'écran de connexion
                 LoginView()
+            }
+        }
+        .task(id: authVM.isAuthenticated) {
+            // Charger les squads automatiquement quand l'utilisateur se connecte
+            if authVM.isAuthenticated {
+                await squadVM.loadUserSquads()
             }
         }
     }
