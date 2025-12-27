@@ -28,7 +28,7 @@ struct CoreNavigationMainTabView: View {
                     .tag(Tab.sessions)
                 
                 // Onglet Squads
-                SquadsListView()
+                SquadListView()
                     .tabItem {
                         Label("Squads", systemImage: "person.3.fill")
                     }

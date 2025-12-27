@@ -32,7 +32,7 @@ final class LocationProvider: NSObject, ObservableObject {
         manager.desiredAccuracy = desiredAccuracy
         manager.distanceFilter = distanceFilter
         // Ne pas forcer allowsBackgroundLocationUpdates ici pour éviter les crashs
-        // L’activation se fera côté projet (Capabilities + Info.plist) puis ici si besoin.
+        // L'activation se fera côté projet (Capabilities + Info.plist) puis ici si besoin.
         manager.pausesLocationUpdatesAutomatically = false
     }
     
@@ -80,8 +80,9 @@ extension LocationProvider: CLLocationManagerDelegate {
     }
     
     nonisolated func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        // On logge simplement; pas d’UI ici
-        Logger.logError(error, context: "LocationProvider.didFailWithError", category: .location)
+        // On logge simplement; pas d'UI ici
+        Task { @MainActor in
+            Logger.logError(error, context: "LocationProvider.didFailWithError", category: .location)
+        }
     }
 }
-

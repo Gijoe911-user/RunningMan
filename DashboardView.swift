@@ -11,6 +11,7 @@ import SwiftUI
 struct DashboardView: View {
     
     @Environment(AuthViewModel.self) private var authVM
+    @Environment(SquadViewModel.self) private var squadVM
     
     var body: some View {
         NavigationStack {
@@ -87,6 +88,41 @@ struct DashboardView: View {
                             }
                         }
                         
+                        // Squads Section
+                        if !squadVM.userSquads.isEmpty {
+                            VStack(alignment: .leading, spacing: 16) {
+                                HStack {
+                                    Text("Mes Squads")
+                                        .font(.headline)
+                                        .foregroundColor(.white)
+                                    
+                                    Spacer()
+                                    
+                                    NavigationLink {
+                                        SquadListView()
+                                    } label: {
+                                        HStack(spacing: 4) {
+                                            Text("Voir tout")
+                                                .font(.subheadline)
+                                            Image(systemName: "chevron.right")
+                                                .font(.caption)
+                                        }
+                                        .foregroundColor(.coralAccent)
+                                    }
+                                }
+                                .padding(.horizontal)
+                                
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 12) {
+                                        ForEach(squadVM.userSquads.prefix(3)) { squad in
+                                            DashboardSquadCard(squad: squad)
+                                        }
+                                    }
+                                    .padding(.horizontal)
+                                }
+                            }
+                        }
+                        
                         Spacer(minLength: 40)
                     }
                 }
@@ -125,10 +161,65 @@ struct DashboardStatCard: View {
     }
 }
 
+// MARK: - Dashboard Squad Card
+
+struct DashboardSquadCard: View {
+    let squad: SquadModel
+    
+    var memberCount: Int {
+        squad.members.count
+    }
+    
+    var body: some View {
+        NavigationLink {
+            SquadDetailView(squad: squad)
+        } label: {
+            VStack(alignment: .leading, spacing: 12) {
+                // Icône
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [Color.coralAccent, Color.pinkAccent],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 50, height: 50)
+                    .overlay {
+                        Image(systemName: "person.3.fill")
+                            .font(.title3)
+                            .foregroundColor(.white)
+                    }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(squad.name)
+                        .font(.subheadline.bold())
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                    
+                    HStack(spacing: 6) {
+                        Image(systemName: "figure.run")
+                            .font(.caption2)
+                        Text("\(memberCount) membres")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.white.opacity(0.7))
+                }
+            }
+            .frame(width: 140)
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Preview
 
 #Preview {
     DashboardView()
         .environment(AuthViewModel())
+        .environment(SquadViewModel())
         .preferredColorScheme(.dark)
 }

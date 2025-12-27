@@ -11,12 +11,15 @@ import SwiftUI
 struct CreateSquadView: View {
     
     @Environment(\.dismiss) private var dismiss
+    @Environment(SquadViewModel.self) private var squadVM
     
     @State private var squadName = ""
     @State private var squadDescription = ""
     @State private var isPublic = true
     @State private var isCreating = false
     @State private var errorMessage: String?
+    @State private var showSuccessSheet = false
+    @State private var createdSquad: SquadModel?
     
     var body: some View {
         NavigationStack {
@@ -144,39 +147,170 @@ struct CreateSquadView: View {
                     Text(error)
                 }
             }
+            .sheet(isPresented: $showSuccessSheet) {
+                if let squad = createdSquad {
+                    SquadCreatedSuccessView(squad: squad) {
+                        dismiss()
+                    }
+                }
+            }
         }
     }
     
     // MARK: - Actions
     
     private func createSquad() {
-        guard let userId = AuthService.shared.currentUserId else {
-            errorMessage = "Utilisateur non connecté"
-            return
-        }
-        
         isCreating = true
         
         Task {
-            do {
-                let squad = try await SquadService.shared.createSquad(
-                    name: squadName,
-                    description: squadDescription,
-                    creatorId: userId
-                )
-                
-                print("✅ Squad créée: \(squad.id ?? "unknown")")
-                print("   Code d'invitation: \(squad.inviteCode)")
-                
-                // Fermer la vue
-                dismiss()
-                
-            } catch {
-                errorMessage = error.localizedDescription
-            }
+            let success = await squadVM.createSquad(
+                name: squadName,
+                description: squadDescription
+            )
             
             isCreating = false
+            
+            if success {
+                // Afficher l'écran de succès avec le code d'invitation
+                if let squad = squadVM.userSquads.first(where: { $0.name == squadName }) {
+                    createdSquad = squad
+                    showSuccessSheet = true
+                }
+            } else if let error = squadVM.errorMessage {
+                errorMessage = error
+            }
         }
+    }
+}
+
+// MARK: - Squad Created Success View
+
+struct SquadCreatedSuccessView: View {
+    let squad: SquadModel
+    let onDismiss: () -> Void
+    
+    @State private var copiedToClipboard = false
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.darkNavy
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 30) {
+                    Spacer()
+                    
+                    // Icône de succès
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.greenAccent.opacity(0.3), Color.greenAccent.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 120, height: 120)
+                        
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 80))
+                            .foregroundColor(.greenAccent)
+                            .symbolEffect(.bounce)
+                    }
+                    
+                    // Message de succès
+                    VStack(spacing: 12) {
+                        Text("Squad créé ! 🎉")
+                            .font(.title.bold())
+                            .foregroundColor(.white)
+                        
+                        Text("Partagez ce code pour inviter vos amis")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.7))
+                            .multilineTextAlignment(.center)
+                    }
+                    
+                    // Code d'invitation
+                    VStack(spacing: 16) {
+                        Text("Code d'invitation")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.6))
+                        
+                        HStack(spacing: 12) {
+                            Text(squad.inviteCode)
+                                .font(.system(size: 32, weight: .bold, design: .monospaced))
+                                .foregroundColor(.coralAccent)
+                                .tracking(4)
+                            
+                            Button {
+                                UIPasteboard.general.string = squad.inviteCode
+                                copiedToClipboard = true
+                                
+                                // Feedback haptique
+                                let generator = UINotificationFeedbackGenerator()
+                                generator.notificationOccurred(.success)
+                                
+                                // Réinitialiser après 2 secondes
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                                    copiedToClipboard = false
+                                }
+                            } label: {
+                                Image(systemName: copiedToClipboard ? "checkmark" : "doc.on.doc")
+                                    .font(.title3)
+                                    .foregroundColor(copiedToClipboard ? .greenAccent : .white)
+                            }
+                        }
+                        .padding()
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        
+                        if copiedToClipboard {
+                            Text("Copié !")
+                                .font(.caption)
+                                .foregroundColor(.greenAccent)
+                                .transition(.scale.combined(with: .opacity))
+                        }
+                    }
+                    .padding(.horizontal, 30)
+                    
+                    Spacer()
+                    
+                    // Bouton Terminer
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Text("Terminer")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.coralAccent, Color.pinkAccent],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.bottom, 50)
+                }
+            }
+            .navigationTitle("Succès")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled()
     }
 }
 

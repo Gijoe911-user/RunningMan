@@ -296,14 +296,18 @@ extension SquadService {
         userId: String,
         listener: @escaping (Result<[SquadModel], Error>) -> Void
     ) -> ListenerRegistration {
-        Logger.log("Activation listener squads pour user: \(userId)", category: .squads)
+        Task { @MainActor in
+            Logger.log("Activation listener squads pour user: \(userId)", category: .squads)
+        }
         
         let query = db.collection("squads")
             .whereField("members.\(userId)", isGreaterThan: "")
         
         let registration = query.addSnapshotListener { snapshot, error in
             if let error = error {
-                Logger.logError(error, context: "observeUserSquads", category: .squads)
+                Task { @MainActor in
+                    Logger.logError(error, context: "observeUserSquads", category: .squads)
+                }
                 listener(.failure(error))
                 return
             }
@@ -317,7 +321,9 @@ extension SquadService {
                 do {
                     return try doc.data(as: SquadModel.self)
                 } catch {
-                    Logger.logError(error, context: "decode SquadModel \(doc.documentID)", category: .squads)
+                    Task { @MainActor in
+                        Logger.logError(error, context: "decode SquadModel \(doc.documentID)", category: .squads)
+                    }
                     return nil
                 }
             }
@@ -334,12 +340,16 @@ extension SquadService {
         squadId: String,
         listener: @escaping (Result<SquadModel?, Error>) -> Void
     ) -> ListenerRegistration {
-        Logger.log("Activation listener squad: \(squadId)", category: .squads)
+        Task { @MainActor in
+            Logger.log("Activation listener squad: \(squadId)", category: .squads)
+        }
         
         let ref = db.collection("squads").document(squadId)
         let registration = ref.addSnapshotListener { snapshot, error in
             if let error = error {
-                Logger.logError(error, context: "observeSquad", category: .squads)
+                Task { @MainActor in
+                    Logger.logError(error, context: "observeSquad", category: .squads)
+                }
                 listener(.failure(error))
                 return
             }
@@ -353,7 +363,9 @@ extension SquadService {
                 let squad = try snapshot.data(as: SquadModel.self)
                 listener(.success(squad))
             } catch {
-                Logger.logError(error, context: "decode SquadModel \(squadId)", category: .squads)
+                Task { @MainActor in
+                    Logger.logError(error, context: "decode SquadModel \(squadId)", category: .squads)
+                }
                 listener(.failure(error))
             }
         }
@@ -368,13 +380,17 @@ extension SquadService {
                 case .success(let squads):
                     continuation.yield(squads)
                 case .failure(let error):
-                    Logger.logError(error, context: "streamUserSquads", category: .squads)
+                    Task { @MainActor in
+                        Logger.logError(error, context: "streamUserSquads", category: .squads)
+                    }
                     // On peut choisir de terminer le stream sur erreur, ici on continue pour robustesse.
                 }
             }
             continuation.onTermination = { _ in
                 reg.remove()
-                Logger.log("Listener user squads arrêté", category: .squads)
+                Task { @MainActor in
+                    Logger.log("Listener user squads arrêté", category: .squads)
+                }
             }
         }
     }
@@ -387,12 +403,16 @@ extension SquadService {
                 case .success(let squad):
                     continuation.yield(squad)
                 case .failure(let error):
-                    Logger.logError(error, context: "streamSquad", category: .squads)
+                    Task { @MainActor in
+                        Logger.logError(error, context: "streamSquad", category: .squads)
+                    }
                 }
             }
             continuation.onTermination = { _ in
                 reg.remove()
-                Logger.log("Listener squad arrêté: \(squadId)", category: .squads)
+                Task { @MainActor in
+                    Logger.log("Listener squad arrêté: \(squadId)", category: .squads)
+                }
             }
         }
     }

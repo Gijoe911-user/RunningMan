@@ -11,10 +11,12 @@ import SwiftUI
 struct JoinSquadView: View {
     
     @Environment(\.dismiss) private var dismiss
+    @Environment(SquadViewModel.self) private var squadVM
     
     @State private var accessCode = ""
     @State private var isJoining = false
-    @State private var errorMessage: String?
+    @State private var showSuccessSheet = false
+    @State private var joinedSquad: SquadModel?
     
     var body: some View {
         NavigationStack {
@@ -62,10 +64,10 @@ struct JoinSquadView: View {
                                     accessCode = String(newValue.prefix(6))
                                 }
                                 // Effacer l'erreur lors de la saisie
-                                errorMessage = nil
+                                squadVM.clearMessages()
                             }
                         
-                        if let error = errorMessage {
+                        if let error = squadVM.errorMessage {
                             Text(error)
                                 .font(.caption)
                                 .foregroundColor(.red)
@@ -123,38 +125,138 @@ struct JoinSquadView: View {
                     .foregroundColor(.coralAccent)
                 }
             }
+            .sheet(isPresented: $showSuccessSheet) {
+                if let squad = joinedSquad {
+                    SquadJoinedSuccessView(squad: squad) {
+                        dismiss()
+                    }
+                }
+            }
         }
     }
     
     // MARK: - Join Squad
     
     private func joinSquad() {
-        guard let userId = AuthService.shared.currentUserId else {
-            errorMessage = "Utilisateur non connecté"
-            return
-        }
-        
         isJoining = true
-        errorMessage = nil
         
         Task {
-            do {
-                let squad = try await SquadService.shared.joinSquad(
-                    inviteCode: accessCode,
-                    userId: userId
-                )
-                
-                print("✅ Squad rejointe: \(squad.name)")
-                print("   ID: \(squad.id ?? "unknown")")
-                
-                // Fermer la vue
-                dismiss()
-                
-            } catch {
-                errorMessage = error.localizedDescription
-                isJoining = false
+            let success = await squadVM.joinSquad(inviteCode: accessCode)
+            
+            isJoining = false
+            
+            if success {
+                // Afficher l'écran de succès
+                if let squad = squadVM.userSquads.last {
+                    joinedSquad = squad
+                    showSuccessSheet = true
+                }
             }
         }
+    }
+}
+
+// MARK: - Squad Joined Success View
+
+struct SquadJoinedSuccessView: View {
+    let squad: SquadModel
+    let onDismiss: () -> Void
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.darkNavy
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 30) {
+                    Spacer()
+                    
+                    // Icône de succès
+                    ZStack {
+                        Circle()
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color.greenAccent.opacity(0.3), Color.greenAccent.opacity(0.1)],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                            )
+                            .frame(width: 120, height: 120)
+                        
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 80))
+                            .foregroundColor(.greenAccent)
+                            .symbolEffect(.bounce)
+                    }
+                    
+                    // Message de succès
+                    VStack(spacing: 12) {
+                        Text("Bienvenue ! 🎉")
+                            .font(.title.bold())
+                            .foregroundColor(.white)
+                        
+                        Text("Vous avez rejoint")
+                            .font(.subheadline)
+                            .foregroundColor(.white.opacity(0.7))
+                        
+                        Text(squad.name)
+                            .font(.title2.bold())
+                            .foregroundColor(.coralAccent)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 30)
+                    }
+                    
+                    // Description du squad
+                    if !squad.description.isEmpty {
+                        Text(squad.description)
+                            .font(.body)
+                            .foregroundColor(.white.opacity(0.8))
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 40)
+                            .padding()
+                            .background(.ultraThinMaterial)
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .padding(.horizontal, 30)
+                    }
+                    
+                    Spacer()
+                    
+                    // Bouton Terminer
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Text("Commencer")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 16)
+                            .background(
+                                LinearGradient(
+                                    colors: [Color.coralAccent, Color.pinkAccent],
+                                    startPoint: .leading,
+                                    endPoint: .trailing
+                                )
+                            )
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                    }
+                    .padding(.horizontal, 30)
+                    .padding(.bottom, 50)
+                }
+            }
+            .navigationTitle("Succès")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        onDismiss()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
+            }
+        }
+        .interactiveDismissDisabled()
     }
 }
 

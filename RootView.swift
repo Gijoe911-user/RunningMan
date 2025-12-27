@@ -18,20 +18,27 @@ struct RootView: View {
             if authVM.isLoading {
                 // Écran de chargement initial
                 loadingView
+                    .transition(.opacity)
             } else if authVM.isAuthenticated {
                 // Utilisateur connecté
                 if authVM.hasSquad {
                     // A déjà rejoint ou créé un squad
                     MainTabView()
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
                 } else {
                     // Première connexion ou pas encore de squad
                     OnboardingSquadView()
+                        .transition(.scale.combined(with: .opacity))
                 }
             } else {
                 // Non authentifié - Afficher l'écran de connexion
                 LoginView()
+                    .transition(.move(edge: .leading).combined(with: .opacity))
             }
         }
+        .animation(.easeInOut(duration: 0.3), value: authVM.isLoading)
+        .animation(.easeInOut(duration: 0.3), value: authVM.isAuthenticated)
+        .animation(.easeInOut(duration: 0.3), value: authVM.hasSquad)
         .task(id: authVM.isAuthenticated) {
             // Charger les squads automatiquement quand l'utilisateur se connecte
             if authVM.isAuthenticated {
@@ -72,10 +79,12 @@ struct RootView: View {
 #Preview("Chargement") {
     RootView()
         .environment(AuthViewModel())
+        .environment(SquadViewModel())
 }
 
 #Preview("Non authentifié") {
     let authVM = AuthViewModel()
     RootView()
         .environment(authVM)
+        .environment(SquadViewModel())
 }
