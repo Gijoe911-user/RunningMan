@@ -11,13 +11,8 @@ import MapKit
 struct MapView: View {
     let runnerLocations: [RunnerLocation]
     let userLocation: CLLocationCoordinate2D?
-    
-    @State private var position: MapCameraPosition = .region(
-        MKCoordinateRegion(
-            center: CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522), // Paris par défaut
-            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
-        )
-    )
+    let routePoints: [RoutePoint]  // Nouveaux: points du parcours
+    @Binding var mapPosition: MapCameraPosition
     
     // Créer une version Equatable de la coordonnée pour onChange
     private var equatableLocation: EquatableCoordinate? {
@@ -26,7 +21,7 @@ struct MapView: View {
     }
     
     var body: some View {
-        Map(position: $position) {
+        Map(position: $mapPosition) {
             // Show user location
             UserAnnotation()
             
@@ -36,19 +31,30 @@ struct MapView: View {
                     RunnerMapAnnotation(runner: runner)
                 }
             }
+            
+            // Show route polyline
+            if routePoints.count > 1 {
+                MapPolyline(coordinates: routePoints.map { $0.coordinate })
+                    .stroke(Color.coralAccent, lineWidth: 3)
+            }
         }
         .onChange(of: equatableLocation) { oldValue, newValue in
+            // Ne centrer automatiquement que si aucune position spécifique n'est définie
             guard let newLocation = newValue else { return }
-            withAnimation {
-                position = .region(
-                    MKCoordinateRegion(
-                        center: CLLocationCoordinate2D(
-                            latitude: newLocation.latitude,
-                            longitude: newLocation.longitude
-                        ),
-                        span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+            
+            // Vérifier si la position actuelle est .automatic
+            if case .automatic = mapPosition {
+                withAnimation {
+                    mapPosition = .region(
+                        MKCoordinateRegion(
+                            center: CLLocationCoordinate2D(
+                                latitude: newLocation.latitude,
+                                longitude: newLocation.longitude
+                            ),
+                            span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
+                        )
                     )
-                )
+                }
             }
         }
     }

@@ -28,6 +28,9 @@ extension Color {
     /// Vert pour les succès/actions positives
     static let greenAccent = Color(red: 0.34, green: 0.82, blue: 0.58) // #57D194
     
+    /// Purple pour les accents violets
+    static let purpleAccent = Color(red: 0.54, green: 0.39, blue: 0.92) // #8A63EB
+    
     // MARK: - Gradient Helpers
     
     /// Dégradé orange -> rose (pour les barres de progression)

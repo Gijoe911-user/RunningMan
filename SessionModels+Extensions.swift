@@ -8,54 +8,12 @@
 import Foundation
 import FirebaseFirestore
 
-// MARK: - Session Type
-
-/// Type de session : Solo ou Groupe
-enum SessionType: String, Codable, CaseIterable {
-    case solo = "SOLO"
-    case group = "GROUP"
-    
-    var displayName: String {
-        switch self {
-        case .solo: return "Solo"
-        case .group: return "Groupe"
-        }
-    }
-    
-    var icon: String {
-        switch self {
-        case .solo: return "person.fill"
-        case .group: return "person.2.fill"
-        }
-    }
-}
-
-// MARK: - Session Visibility
-
-/// Visibilité de la session dans la squad
-enum SessionVisibility: String, Codable, CaseIterable {
-    case `private` = "PRIVATE"  // Invisible pour les autres
-    case squad = "SQUAD"  // Visible par la squad
-    
-    var displayName: String {
-        switch self {
-        case .private: return "Privé"
-        case .squad: return "Squad"
-        }
-    }
-}
+// NOTE: SessionType, SessionVisibility et RunType sont définis dans SessionModel.swift
+// Ce fichier contient uniquement les extensions et types supplémentaires
 
 // MARK: - Session Model Extension
 
 extension SessionModel {
-    /// Indique si la session peut être rejointe par d'autres utilisateurs
-    var isJoinable: Bool {
-        get {
-            // Si pas de champ spécifique, considérer joinable par défaut pour les sessions de groupe
-            sessionType == .group && status == .active
-        }
-    }
-    
     /// Titre formaté pour affichage
     var displayTitle: String {
         if let title = title, !title.isEmpty {
@@ -63,7 +21,7 @@ extension SessionModel {
         }
         
         // Génération automatique
-        switch sessionType {
+        switch runType {
         case .solo:
             return "Run Solo"
         case .group:
@@ -193,7 +151,8 @@ struct SessionDiscovery: Identifiable {
 struct SessionCreateOptions {
     var squadId: String
     var creatorId: String
-    var sessionType: SessionType
+    var activityType: ActivityType
+    var runType: RunType
     var visibility: SessionVisibility
     var title: String?
     var isJoinable: Bool
@@ -203,7 +162,8 @@ struct SessionCreateOptions {
     init(
         squadId: String,
         creatorId: String,
-        sessionType: SessionType = .solo,
+        activityType: ActivityType = .training,
+        runType: RunType = .solo,
         visibility: SessionVisibility = .squad,
         title: String? = nil,
         isJoinable: Bool = true,
@@ -212,7 +172,8 @@ struct SessionCreateOptions {
     ) {
         self.squadId = squadId
         self.creatorId = creatorId
-        self.sessionType = sessionType
+        self.activityType = activityType
+        self.runType = runType
         self.visibility = visibility
         self.title = title
         self.isJoinable = isJoinable

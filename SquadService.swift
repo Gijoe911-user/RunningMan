@@ -14,7 +14,10 @@ class SquadService {
     
     static let shared = SquadService()
     
-    private lazy var db = Firestore.firestore()
+    // Utiliser une computed property pour garantir que Firebase est configuré
+    private var db: Firestore {
+        Firestore.firestore()
+    }
     
     private init() {
         Logger.log("SquadService initialisé", category: .squads)

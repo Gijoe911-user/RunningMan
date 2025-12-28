@@ -11,10 +11,17 @@ import SwiftUI
 struct SquadDetailView: View {
     let squad: SquadModel
     
+    @Environment(\.dismiss) private var dismiss
+    @Environment(SquadViewModel.self) private var squadVM
+    @Environment(AppState.self) private var appState
+    
     @State private var showLeaveConfirmation = false
     @State private var showStartSession = false
     @State private var isLeaving = false
     @State private var errorMessage: String?
+    @State private var copiedToClipboard = false
+    @State private var showShareSheet = false
+    @State private var showSessionsList = false
     
     var body: some View {
         ZStack {
@@ -46,6 +53,19 @@ struct SquadDetailView: View {
         }
         .navigationTitle(squad.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showShareSheet = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundColor(.coralAccent)
+                }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(items: [shareText])
+        }
         .alert("Quitter la squad ?", isPresented: $showLeaveConfirmation) {
             Button("Annuler", role: .cancel) { }
             Button("Quitter", role: .destructive) {
@@ -62,11 +82,30 @@ struct SquadDetailView: View {
             }
         }
         .sheet(isPresented: $showStartSession) {
-            CreateSessionView(squad: squad)
+            CreateSessionView(squad: squad) {
+                // ✅ Callback : Redirection avec délai pour transition fluide
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    appState.selectedTab = 2 // Redirection vers l'onglet Sessions (Course)
+                }
+            }
+        }
+        .navigationDestination(isPresented: $showSessionsList) {
+            SquadSessionsListView(squad: squad)
+        }
+        .task {
+            // Définir le contexte du service de localisation en temps réel
+            if let squadId = squad.id {
+                RealtimeLocationService.shared.setContext(squadId: squadId)
+                Logger.log("🎯 Contexte défini pour squad: \(squadId)", category: .location)
+            }
         }
     }
     
     // MARK: - Actions
+    
+    private var shareText: String {
+        "Rejoins mon squad '\(squad.name)' sur RunningMan ! 🏃\nCode d'invitation : \(squad.inviteCode)"
+    }
     
     private func leaveSquad() {
         guard let userId = AuthService.shared.currentUserId else { return }
@@ -77,7 +116,12 @@ struct SquadDetailView: View {
             do {
                 if let squadId = squad.id {
                     try await SquadService.shared.leaveSquad(squadId: squadId, userId: userId)
-                    // TODO: Navigation back
+                    
+                    // Recharger les squads dans le ViewModel
+                    await squadVM.loadUserSquads()
+                    
+                    // Fermer la vue détail
+                    dismiss()
                 }
             } catch {
                 errorMessage = error.localizedDescription
@@ -138,28 +182,60 @@ struct SquadDetailView: View {
     // MARK: - Invite Code Section
     
     private var inviteCodeSection: some View {
-        VStack(spacing: 8) {
-            Text("Code d'invitation")
-                .font(.caption)
-                .foregroundColor(.white.opacity(0.7))
+        VStack(spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Code d'invitation")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                    
+                    Text("Partagez ce code avec vos amis")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                
+                Spacer()
+            }
             
             HStack(spacing: 16) {
                 Text(squad.inviteCode)
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(.white)
+                    .font(.system(size: 28, weight: .bold, design: .monospaced))
+                    .foregroundColor(.coralAccent)
                     .tracking(4)
+                
+                Spacer()
                 
                 Button {
                     UIPasteboard.general.string = squad.inviteCode
+                    copiedToClipboard = true
+                    
+                    // Haptic feedback
+                    let generator = UINotificationFeedbackGenerator()
+                    generator.notificationOccurred(.success)
+                    
+                    // Reset after 2 seconds
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                        copiedToClipboard = false
+                    }
                 } label: {
-                    Image(systemName: "doc.on.doc.fill")
-                        .foregroundColor(.coralAccent)
+                    HStack(spacing: 6) {
+                        Image(systemName: copiedToClipboard ? "checkmark" : "doc.on.doc")
+                            .font(.title3)
+                        if copiedToClipboard {
+                            Text("Copié")
+                                .font(.caption.bold())
+                        }
+                    }
+                    .foregroundColor(copiedToClipboard ? .greenAccent : .coralAccent)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(copiedToClipboard ? Color.greenAccent.opacity(0.2) : Color.coralAccent.opacity(0.2))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
             .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.white.opacity(0.1))
+            .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -168,37 +244,111 @@ struct SquadDetailView: View {
     
     private var actionsSection: some View {
         VStack(spacing: 12) {
+            // Bouton Voir les sessions
+            Button {
+                showSessionsList = true
+            } label: {
+                HStack {
+                    Image(systemName: "list.bullet.rectangle.fill")
+                    Text("Voir les sessions")
+                    Spacer()
+                    if squad.hasActiveSessions {
+                        Circle()
+                            .fill(Color.green)
+                            .frame(width: 8, height: 8)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                }
+                .font(.subheadline.bold())
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .padding(.horizontal)
+                .background(
+                    LinearGradient(
+                        colors: [Color.purpleAccent, Color.blueAccent],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            
+            // Bouton Partager
+            Button {
+                showShareSheet = true
+            } label: {
+                HStack {
+                    Image(systemName: "square.and.arrow.up")
+                    Text("Partager le code")
+                }
+                .font(.subheadline.bold())
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    LinearGradient(
+                        colors: [Color.blueAccent, Color.purpleAccent],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+            
             // Bouton Démarrer Session (si admin/coach)
             if canStartSession {
                 Button {
                     showStartSession = true
                 } label: {
-                    Label("Démarrer une session", systemImage: "play.circle.fill")
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 50)
-                        .background(Color.coralAccent)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
+                    HStack {
+                        Image(systemName: "play.circle.fill")
+                        Text("Démarrer une session")
+                    }
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(
+                        LinearGradient(
+                            colors: [Color.coralAccent, Color.pinkAccent],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .foregroundColor(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
             }
             
             // Bouton Quitter Squad
-            Button {
-                showLeaveConfirmation = true
-            } label: {
-                Label("Quitter la squad", systemImage: "rectangle.portrait.and.arrow.right")
+            if !isCreator {
+                Button {
+                    showLeaveConfirmation = true
+                } label: {
+                    HStack {
+                        Image(systemName: "rectangle.portrait.and.arrow.right")
+                        Text("Quitter la squad")
+                    }
+                    .font(.subheadline.bold())
                     .frame(maxWidth: .infinity)
                     .frame(height: 50)
                     .background(Color.white.opacity(0.1))
                     .foregroundColor(.red)
-                    .cornerRadius(12)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+                .disabled(isLeaving)
+                .opacity(isLeaving ? 0.5 : 1)
             }
-            .disabled(isLeaving)
-            .opacity(isLeaving ? 0.5 : 1)
         }
     }
     
     // MARK: - Computed Properties
+    
+    private var isCreator: Bool {
+        guard let userId = AuthService.shared.currentUserId else { return false }
+        return squad.creatorId == userId
+    }
     
     private var canStartSession: Bool {
         guard let userId = AuthService.shared.currentUserId else { return false }
@@ -363,6 +513,19 @@ private struct SquadStatCard: View {
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
+}
+
+// MARK: - Share Sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        return controller
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 // MARK: - Preview

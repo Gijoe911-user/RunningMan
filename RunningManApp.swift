@@ -1,45 +1,40 @@
-//
-//  RunningManApp.swift
-//  RunningMan
-//
-//  Created by jocelyn GIARD on 19/12/2025.
-//
-
 import SwiftUI
 import FirebaseCore
-import FirebaseAuth
 
 class AppDelegate: NSObject, UIApplicationDelegate {
-  func application(_ application: UIApplication,
-                   didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
-    // Firebase est déjà configuré dans l'init de RunningManApp
-    Logger.log("AppDelegate initialisé", category: .firebase)
-    return true
-  }
+    func application(_ application: UIApplication,
+                     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
+        FirebaseApp.configure()
+        print("🔥 Firebase configuré avec succès dans l'AppDelegate")
+        return true
+    }
 }
 
 @main
 struct RunningManApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) var delegate
-    @State private var authViewModel: AuthViewModel
-    @State private var squadViewModel = SquadViewModel()
-    
-    // Initialise Firebase AVANT la création de authViewModel
-    init() {
-        // Configure Firebase en premier
-        FirebaseApp.configure()
-        Logger.log("Firebase configuré dans l'initializer de App", category: .firebase)
-        
-        // Maintenant on peut créer authViewModel en toute sécurité
-        _authViewModel = State(initialValue: AuthViewModel())
-    }
     
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environment(authViewModel) // Injection moderne iOS 17+
-                .environment(squadViewModel) // Injection SquadViewModel
+            // Utiliser un wrapper qui crée les ViewModels APRÈS que Firebase soit configuré
+            AppRootView()
                 .preferredColorScheme(.dark)
         }
+    }
+}
+
+/// Vue wrapper qui initialise les ViewModels de manière lazy
+struct AppRootView: View {
+    // Ces ViewModels sont créés UNIQUEMENT quand cette vue est affichée,
+    // donc APRÈS que l'AppDelegate ait configuré Firebase
+    @State private var appState = AppState()
+    @State private var authViewModel = AuthViewModel()
+    @State private var squadViewModel = SquadViewModel()
+    
+    var body: some View {
+        RootView()
+            .environment(appState)
+            .environment(authViewModel)
+            .environment(squadViewModel)
     }
 }

@@ -45,6 +45,18 @@ struct SquadListView: View {
             .sheet(isPresented: $showJoinSquad) {
                 JoinSquadView()
             }
+            .task {
+                // Charger les squads au premier affichage
+                await squadVM.loadUserSquads()
+                
+                // Démarrer l'observation en temps réel
+                squadVM.startObservingSquads()
+            }
+            .onDisappear {
+                // Optionnel : arrêter l'observation quand la vue disparaît
+                // Commenté pour garder la sync active en arrière-plan
+                // squadVM.stopObservingSquads()
+            }
         }
     }
     

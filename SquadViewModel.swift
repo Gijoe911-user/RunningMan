@@ -35,6 +35,11 @@ class SquadViewModel {
     private let squadService = SquadService.shared
     private let authService = AuthService.shared
     
+    // MARK: - Real-time Listener
+    
+    // Stocker la tâche d'observation
+    private var observationTask: Task<Void, Never>?
+    
     // MARK: - Computed Properties
     
     /// Indique si l'utilisateur fait partie d'au moins une squad
@@ -264,5 +269,64 @@ class SquadViewModel {
     func clearMessages() {
         errorMessage = nil
         successMessage = nil
+    }
+    
+    // MARK: - Real-time Updates
+    
+    /// Démarre l'observation en temps réel des squads de l'utilisateur
+    func startObservingSquads() {
+        guard let userId = currentUserId else { return }
+        
+        // Empêcher de créer plusieurs listeners
+        guard observationTask == nil else {
+            Logger.log("Listener déjà actif, ignorer la demande", category: .squads)
+            return
+        }
+        
+        // Créer un nouveau listener
+        observationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            
+            let stream = squadService.streamUserSquads(userId: userId)
+            
+            for await squads in stream {
+                // Vérifier si la tâche a été annulée
+                guard !Task.isCancelled else {
+                    Logger.log("Observation des squads annulée", category: .squads)
+                    break
+                }
+                
+                // Mettre à jour la liste locale
+                self.userSquads = squads
+                
+                // Mettre à jour la squad sélectionnée si elle a changé
+                if let selectedId = self.selectedSquad?.id,
+                   let updatedSelected = squads.first(where: { $0.id == selectedId }) {
+                    self.selectedSquad = updatedSelected
+                } else if self.selectedSquad != nil && !squads.contains(where: { $0.id == self.selectedSquad?.id }) {
+                    // Si la squad sélectionnée n'existe plus, sélectionner la première disponible
+                    self.selectedSquad = squads.first
+                }
+                
+                Logger.log("Squads mises à jour en temps réel: \(squads.count)", category: .squads)
+            }
+            
+            Logger.log("Stream des squads terminé", category: .squads)
+        }
+    }
+    
+    /// Arrête l'observation en temps réel
+    func stopObservingSquads() {
+        observationTask?.cancel()
+        observationTask = nil
+        Logger.log("Observation des squads arrêtée", category: .squads)
+    }
+    
+    // MARK: - Cleanup
+    
+    deinit {
+        // Note: observationTask est MainActor isolé et ne peut pas être accédé depuis deinit
+        // La tâche sera automatiquement nettoyée quand self est deallocated grâce à [weak self]
+        // Bonne pratique : appelez stopObservingSquads() explicitement dans .onDisappear de la vue
     }
 }

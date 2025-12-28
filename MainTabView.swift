@@ -10,32 +10,35 @@ import SwiftUI
 // Navigation principale avec TabView pour l'application
 struct MainTabView: View {
     
-    @State private var selectedTab = 0
+    @Environment(AppState.self) private var appState
     
     var body: some View {
-        TabView(selection: $selectedTab) {
-            // Onglet 1 : Dashboard
+        // ✅ @Bindable permet de créer un binding depuis un @Observable
+        @Bindable var appState = appState
+        
+        TabView(selection: $appState.selectedTab) {
+            // Onglet 0 : Dashboard
             DashboardView()
                 .tabItem {
                     Label("Accueil", systemImage: "house.fill")
                 }
                 .tag(0)
             
-            // Onglet 2 : Squads
+            // Onglet 1 : Squads
             SquadListView()
                 .tabItem {
                     Label("Squads", systemImage: "person.3.fill")
                 }
                 .tag(1)
             
-            // Onglet 3 : Course
-            RunTrackingView()
+            // Onglet 2 : Sessions (Liste complète) ← Vue corrigée !
+            AllSessionsView()
                 .tabItem {
-                    Label("Course", systemImage: "figure.run")
+                    Label("Sessions", systemImage: "list.bullet.rectangle.fill")
                 }
                 .tag(2)
             
-            // Onglet 4 : Profil
+            // Onglet 3 : Profil
             ProfileView()
                 .tabItem {
                     Label("Profil", systemImage: "person.fill")
@@ -50,6 +53,7 @@ struct MainTabView: View {
 
 #Preview {
     MainTabView()
+        .environment(AppState())
         .environment(AuthViewModel())
         .preferredColorScheme(.dark)
 }

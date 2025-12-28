@@ -22,11 +22,13 @@ class SessionsViewModel: NSObject, ObservableObject {
     @Published var runnerLocations: [RunnerLocation] = []
     @Published var activeRunners: [RunnerLocation] = [] // compat UI existante
     @Published var userLocation: CLLocationCoordinate2D?
+    @Published var routeCoordinates: [CLLocationCoordinate2D] = [] // Tracé GPS
     @Published var unreadMessagesCount: Int = 0
     @Published var marathonProgress: MarathonProgress?
     
     // MARK: - Services
     private let realtimeService: RealtimeLocationService
+    private let routeService = RouteTrackingService.shared
     
     // MARK: - Subscriptions
     private var cancellables = Set<AnyCancellable>()
@@ -41,6 +43,7 @@ class SessionsViewModel: NSObject, ObservableObject {
     
     // MARK: - Context
     func setContext(squadId: String) {
+        Logger.log("🔧 SessionsViewModel.setContext appelé avec squadId: \(squadId)", category: .session)
         realtimeService.setContext(squadId: squadId)
     }
     
@@ -59,6 +62,40 @@ class SessionsViewModel: NSObject, ObservableObject {
     
     func zoomOut() {
         // TODO: Implémenter zoom via Map region (piloté par la vue)
+    }
+    
+    // MARK: - Session Actions
+    
+    /// Termine la session active
+    func endSession() async throws {
+        guard let session = activeSession,
+              let sessionId = session.id else {
+            Logger.log("❌ Impossible de terminer la session: pas de session active", category: .session)
+            throw SessionError.sessionNotFound
+        }
+        
+        guard let userId = AuthService.shared.currentUserId else {
+            Logger.log("❌ Utilisateur non connecté", category: .session)
+            throw SessionError.notAuthorized
+        }
+        
+        // Vérifier que l'utilisateur est le créateur
+        guard session.creatorId == userId else {
+            Logger.log("❌ Seul le créateur peut terminer la session", category: .session)
+            throw SessionError.notAuthorized
+        }
+        
+        Logger.log("🛑 Fin de la session \(sessionId)...", category: .session)
+        
+        // Arrêter le tracking de localisation (via LocationProvider)
+        LocationProvider.shared.stopUpdating()
+        
+        // Terminer la session dans Firestore
+        try await SessionService.shared.endSession(sessionId: sessionId)
+        
+        Logger.logSuccess("✅ Session terminée avec succès", category: .session)
+        
+        // La session sera automatiquement mise à nil via le listener
     }
     
     // MARK: - Communication Actions
@@ -82,6 +119,7 @@ class SessionsViewModel: NSObject, ObservableObject {
         realtimeService.$activeSession
             .receive(on: RunLoop.main)
             .sink { [weak self] session in
+                Logger.log("📥 SessionsViewModel reçoit session: \(session?.id ?? "nil")", category: .session)
                 self?.activeSession = session
             }
             .store(in: &cancellables)
@@ -89,6 +127,7 @@ class SessionsViewModel: NSObject, ObservableObject {
         realtimeService.$runnerLocations
             .receive(on: RunLoop.main)
             .sink { [weak self] runners in
+                Logger.log("👥 SessionsViewModel reçoit \(runners.count) runners", category: .location)
                 self?.runnerLocations = runners
                 self?.activeRunners = runners // compat UI existante
             }
@@ -97,6 +136,13 @@ class SessionsViewModel: NSObject, ObservableObject {
         realtimeService.$userCoordinate
             .receive(on: RunLoop.main)
             .sink { [weak self] coord in
+                if let coord = coord {
+                    Logger.log("📍 SessionsViewModel reçoit position: \(coord.latitude), \(coord.longitude)", category: .location)
+                    
+                    // Ajouter au tracé
+                    self?.routeService.addRoutePoint(coord)
+                    self?.routeCoordinates = self?.routeService.getCurrentRoute() ?? []
+                }
                 self?.userLocation = coord
             }
             .store(in: &cancellables)

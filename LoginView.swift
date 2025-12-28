@@ -153,7 +153,7 @@ struct LoginView: View {
             // Display Name (only for sign up)
             if isSignUpMode {
                 TextField("Nom d'affichage", text: $displayName)
-                    .textFieldStyle(CustomTextFieldStyle())
+                    .textFieldStyle(LoginTextFieldStyle())
                     .autocorrectionDisabled()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -288,9 +288,9 @@ struct LoginView: View {
     }
 }
 
-// MARK: - Custom TextField Style
+// MARK: - Login TextField Style (specific to login)
 
-struct CustomTextFieldStyle: TextFieldStyle {
+struct LoginTextFieldStyle: TextFieldStyle {
     func _body(configuration: TextField<Self._Label>) -> some View {
         configuration
             .padding()

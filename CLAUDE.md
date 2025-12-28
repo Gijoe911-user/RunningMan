@@ -144,7 +144,7 @@ Il est important de préciser à l'IA comment gérer les deux cas de figure que 
 => S'il est dans une Squad -> Afficher le MainDashboard (avec la carte et le flux social)."
 3. Securité ; il faut définir les règles de sécurité Firebase** pour que seuls les membres d'une "Squad" puissent voir les positions GPS des autres 
 
-
+Attention voici le code firebase que j'ai modifier et qu'il faut fixer :''
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {

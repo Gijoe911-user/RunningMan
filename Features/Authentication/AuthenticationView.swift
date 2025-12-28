@@ -9,7 +9,8 @@ import SwiftUI
 import FirebaseAuth
 
 struct AuthenticationView: View {
-    @EnvironmentObject var appState: AppState
+    // ✅ Migration vers @Environment (syntaxe iOS 17+)
+    @Environment(AppState.self) private var appState
     
     @State private var email = ""
     @State private var password = ""

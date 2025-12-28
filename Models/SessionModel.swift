@@ -9,49 +9,41 @@ import Foundation
 import FirebaseFirestore
 
 /// Modèle représentant une session de course
-/// Collection Firestore : `sessions/{sessionId}`
-struct SessionModel: Identifiable, Codable {
+struct SessionModel: Identifiable, Codable, Hashable {
     
-    /// ID unique de la session
+    // MARK: - Properties
+    
     @DocumentID var id: String?
-    
-    /// ID de la squad associée
     var squadId: String
-    
-    /// ID du créateur de la session
     var creatorId: String
-    
-    /// Date et heure de début de la session
     var startedAt: Date
-    
-    /// Date et heure de fin de la session (nil si en cours)
     var endedAt: Date?
-    
-    /// Statut actuel de la session
     var status: SessionStatus
-    
-    /// Liste des participants (userIds)
     var participants: [String]
     
-    /// Distance totale parcourue par le groupe (en mètres)
+    // Champs fusionnés
     var totalDistanceMeters: Double
-    
-    /// Durée totale de la session (en secondes)
     var durationSeconds: TimeInterval
+    var averageSpeed: Double
+    var startLocation: GeoPoint?
+    var messageCount: Int
     
-    /// Objectif de distance (optionnel, en mètres)
+    // Champs optionnels du modèle "vieux" mais utiles
     var targetDistanceMeters: Double?
-    
-    /// Titre de la session (optionnel)
     var title: String?
-    
-    /// Notes ou description de la session
     var notes: String?
+    var activityType: ActivityType  // Renommé de sessionType
     
-    /// Type de session
-    var sessionType: SessionType
+    // 🆕 NOUVEAUX CHAMPS - Refonte Incrément 3
+    var runType: RunType  // SOLO ou GROUP
+    var visibility: SessionVisibility  // PRIVATE ou SQUAD
+    var isJoinable: Bool  // Peut-on rejoindre cette session ?
+    var maxParticipants: Int?  // Limite de participants (optionnel)
     
-    // MARK: - Initialisation
+    var createdAt: Date
+    var updatedAt: Date
+    
+    // MARK: - Initialization
     
     init(
         id: String? = nil,
@@ -63,10 +55,19 @@ struct SessionModel: Identifiable, Codable {
         participants: [String] = [],
         totalDistanceMeters: Double = 0,
         durationSeconds: TimeInterval = 0,
+        averageSpeed: Double = 0,
+        startLocation: GeoPoint? = nil,
+        messageCount: Int = 0,
         targetDistanceMeters: Double? = nil,
         title: String? = nil,
         notes: String? = nil,
-        sessionType: SessionType = .training
+        activityType: ActivityType = .training,
+        runType: RunType = .solo,  // 🆕
+        visibility: SessionVisibility = .squad,  // 🆕
+        isJoinable: Bool = true,  // 🆕
+        maxParticipants: Int? = nil,  // 🆕
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
     ) {
         self.id = id
         self.squadId = squadId
@@ -77,148 +78,148 @@ struct SessionModel: Identifiable, Codable {
         self.participants = participants
         self.totalDistanceMeters = totalDistanceMeters
         self.durationSeconds = durationSeconds
+        self.averageSpeed = averageSpeed
+        self.startLocation = startLocation
+        self.messageCount = messageCount
         self.targetDistanceMeters = targetDistanceMeters
         self.title = title
         self.notes = notes
-        self.sessionType = sessionType
+        self.activityType = activityType
+        self.runType = runType  // 🆕
+        self.visibility = visibility  // 🆕
+        self.isJoinable = isJoinable  // 🆕
+        self.maxParticipants = maxParticipants  // 🆕
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
-}
-
-// MARK: - SessionStatus
-
-/// Statut d'une session de course
-enum SessionStatus: String, Codable {
-    case active = "ACTIVE"      // Session en cours
-    case paused = "PAUSED"      // Session en pause
-    case ended = "ENDED"        // Session terminée
-}
-
-// MARK: - SessionType
-
-/// Type de session
-enum SessionType: String, Codable {
-    case training = "TRAINING"        // Entraînement
-    case race = "RACE"               // Course/Marathon
-    case casual = "CASUAL"           // Course décontractée
-}
-
-// MARK: - Helper Extensions
-
-extension SessionModel {
     
-    /// Durée formatée (HH:MM:SS)
+    // MARK: - Computed Properties (Logique métier)
+    
+    var isActive: Bool { status == .active }
+    var isPaused: Bool { status == .paused }
+    var isEnded: Bool { status == .ended }
+    
+    var distanceInKilometers: Double { totalDistanceMeters / 1000.0 }
+    
     var formattedDuration: String {
         let hours = Int(durationSeconds) / 3600
         let minutes = (Int(durationSeconds) % 3600) / 60
         let seconds = Int(durationSeconds) % 60
-        
-        if hours > 0 {
-            return String(format: "%02d:%02d:%02d", hours, minutes, seconds)
-        } else {
-            return String(format: "%02d:%02d", minutes, seconds)
+        return hours > 0 ? String(format: "%02d:%02d:%02d", hours, minutes, seconds) : String(format: "%02d:%02d", minutes, seconds)
+    }
+    
+    var averageSpeedKmh: Double { averageSpeed * 3.6 }
+    
+    var averagePaceMinPerKm: String {
+        guard averageSpeed > 0 else { return "--:--" }
+        let minutesPerKm = (1000.0 / averageSpeed) / 60.0
+        let minutes = Int(minutesPerKm)
+        let seconds = Int((minutesPerKm - Double(minutes)) * 60)
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    // MARK: - Hashable Implementation
+    static func == (lhs: SessionModel, rhs: SessionModel) -> Bool { lhs.id == rhs.id }
+    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+}
+
+// MARK: - Enums
+
+enum SessionStatus: String, Codable {
+    case active = "ACTIVE"
+    case paused = "PAUSED"
+    case ended = "ENDED"
+}
+
+/// Type d'activité de la session (ancien sessionType renommé)
+enum ActivityType: String, Codable, CaseIterable {
+    case training = "TRAINING"
+    case race = "RACE"
+    case interval = "INTERVAL"
+    case recovery = "RECOVERY"
+    
+    var displayName: String {
+        switch self {
+        case .training: return "Entraînement"
+        case .race: return "Course"
+        case .interval: return "Fractionné"
+        case .recovery: return "Récupération"
         }
     }
     
-    /// Distance formatée en km
-    var formattedDistance: String {
-        let km = totalDistanceMeters / 1000.0
-        return String(format: "%.2f km", km)
+    var icon: String {
+        switch self {
+        case .training: return "figure.run"
+        case .race: return "trophy.fill"
+        case .interval: return "waveform.path.ecg"
+        case .recovery: return "leaf.fill"
+        }
     }
+}
+
+/// 🆕 Type de run : Solo ou Groupe (Refonte Incrément 3)
+enum RunType: String, Codable, CaseIterable {
+    case solo = "SOLO"
+    case group = "GROUP"
     
-    /// Vitesse moyenne (km/h)
-    var averageSpeed: Double {
-        guard durationSeconds > 0 else { return 0 }
-        let hours = durationSeconds / 3600.0
-        let km = totalDistanceMeters / 1000.0
-        return km / hours
-    }
-    
-    /// Vitesse moyenne formatée
-    var formattedAverageSpeed: String {
-        return String(format: "%.2f km/h", averageSpeed)
-    }
-    
-    /// Allure moyenne (min/km)
-    var averagePace: Double {
-        guard totalDistanceMeters > 0 else { return 0 }
-        let km = totalDistanceMeters / 1000.0
-        let minutes = durationSeconds / 60.0
-        return minutes / km
-    }
-    
-    /// Allure moyenne formatée (mm:ss/km)
-    var formattedAveragePace: String {
-        let minutes = Int(averagePace)
-        let seconds = Int((averagePace - Double(minutes)) * 60)
-        return String(format: "%d:%02d /km", minutes, seconds)
-    }
-    
-    /// Vérifie si la session est active
-    var isActive: Bool {
-        status == .active
-    }
-    
-    /// Vérifie si la session est terminée
-    var isEnded: Bool {
-        status == .ended
-    }
-    
-    /// Nombre de participants
-    var participantCount: Int {
-        participants.count
-    }
-    
-    /// Ajoute un participant
-    mutating func addParticipant(userId: String) {
-        if !participants.contains(userId) {
-            participants.append(userId)
+    var displayName: String {
+        switch self {
+        case .solo: return "Solo"
+        case .group: return "Groupe"
         }
     }
     
-    /// Retire un participant
-    mutating func removeParticipant(userId: String) {
-        participants.removeAll { $0 == userId }
-    }
-    
-    /// Vérifie si un utilisateur participe
-    func isParticipant(userId: String) -> Bool {
-        participants.contains(userId)
-    }
-    
-    /// Met à jour la durée (appelé régulièrement pendant la session)
-    mutating func updateDuration() {
-        guard status == .active else { return }
-        durationSeconds = Date().timeIntervalSince(startedAt)
+    var icon: String {
+        switch self {
+        case .solo: return "person.fill"
+        case .group: return "person.2.fill"
+        }
     }
 }
 
-// MARK: - SessionStats
-
-/// Statistiques détaillées d'une session (pour affichage)
-struct SessionStats: Codable {
-    var sessionId: String
-    var totalDistance: Double
-    var duration: TimeInterval
-    var averageSpeed: Double
-    var averagePace: Double
-    var maxSpeed: Double
-    var participantCount: Int
-    var startedAt: Date
-    var endedAt: Date?
+/// 🆕 Visibilité de la session (Refonte Incrément 3)
+enum SessionVisibility: String, Codable, CaseIterable {
+    case `private` = "PRIVATE"  // Invisible pour les autres
+    case squad = "SQUAD"  // Visible par la squad
+    
+    var displayName: String {
+        switch self {
+        case .private: return "Privé"
+        case .squad: return "Squad"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .private: return "lock.fill"
+        case .squad: return "person.3.fill"
+        }
+    }
 }
 
+// MARK: - Participant Statistics
 
-struct LiveFeedItem: Identifiable, Codable {
-    @DocumentID var id: String?
-    var type: FeedItemType // .audio, .photo, .cheer, .info
-    var senderId: String
-    var senderName: String
-    var contentUrl: String? // URL vers Firebase Storage (vocal ou photo)
-    var message: String?
+struct ParticipantStats: Codable {
+    var userId: String
+    var distance: Double = 0
+    var duration: TimeInterval = 0
+    var averageSpeed: Double = 0
+    var maxSpeed: Double = 0
+    var locationPointsCount: Int = 0
+    var joinedAt: Date = Date()
+    var leftAt: Date?
+}
+
+// MARK: - Location Point
+
+struct LocationPoint: Codable {
+    var userId: String
+    var latitude: Double
+    var longitude: Double
+    var altitude: Double
+    var speed: Double
+    var horizontalAccuracy: Double
     var timestamp: Date
-    var location: GeoPoint? // Où l'item a été créé
-    
-    enum FeedItemType: String, Codable {
-        case audio, photo, cheer, info
-    }
+    @ServerTimestamp var serverTimestamp: Timestamp?
 }
+

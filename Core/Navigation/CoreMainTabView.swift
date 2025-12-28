@@ -8,8 +8,8 @@
 import SwiftUI
 
 struct CoreNavigationMainTabView: View {
-    @EnvironmentObject var appState: AppState
-    @State private var selectedTab: Tab = .sessions
+    // ✅ Migration vers @Environment (syntaxe iOS 17+)
+    @Environment(AppState.self) private var appState
     
     enum Tab {
         case sessions
@@ -18,28 +18,31 @@ struct CoreNavigationMainTabView: View {
     }
     
     var body: some View {
+        // ✅ @Bindable permet de créer un binding depuis @Observable
+        @Bindable var appState = appState
+        
         NavigationStack {
-            TabView(selection: $selectedTab) {
+            TabView(selection: $appState.selectedTab) {
                 // Onglet Sessions (Vue principale avec la carte)
                 SessionsListView()
                     .tabItem {
                         Label("Sessions", systemImage: "figure.run")
                     }
-                    .tag(Tab.sessions)
+                    .tag(2) // ✅ Utilisez les mêmes tags que MainTabView
                 
                 // Onglet Squads
                 SquadListView()
                     .tabItem {
                         Label("Squads", systemImage: "person.3.fill")
                     }
-                    .tag(Tab.squads)
+                    .tag(1)
                 
                 // Onglet Profil
                 ProfileView()
                     .tabItem {
                         Label("Profil", systemImage: "person.circle.fill")
                     }
-                    .tag(Tab.profile)
+                    .tag(3)
             }
             .tint(Color("CoralAccent"))
         }

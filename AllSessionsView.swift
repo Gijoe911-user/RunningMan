@@ -261,7 +261,9 @@ struct AllSessionsView: View {
             }
             
             // Bouton vers les squads
-            NavigationLink(destination: SquadListView()) {
+            NavigationLink {
+                Text("Squads View")  // Placeholder - À remplacer par SquadListView()
+            } label: {
                 HStack {
                     Image(systemName: "person.3.fill")
                     Text("Voir mes squads")
@@ -288,7 +290,7 @@ struct AllSessionsView: View {
     // MARK: - Computed Properties
     
     private var squadsWithActiveSessions: [SquadModel] {
-        squadVM.squads.filter { $0.hasActiveSessions }
+        squadVM.userSquads.filter { $0.hasActiveSessions }  // ✅ CORRIGÉ
     }
     
     // MARK: - Load Data
@@ -298,7 +300,7 @@ struct AllSessionsView: View {
         errorMessage = nil
         
         // Charger les sessions de TOUS les squads de l'utilisateur
-        let userSquads = squadVM.squads
+        let userSquads = squadVM.userSquads  // ✅ CORRIGÉ
         
         guard !userSquads.isEmpty else {
             isLoading = false
@@ -391,10 +393,6 @@ struct SquadActiveSessionCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 }
-
-// MARK: - Placeholder SquadListView reference
-
-// Cette vue existe déjà dans votre projet, pas besoin de la redéfinir ici
 
 // MARK: - Preview
 

@@ -28,6 +28,7 @@ enum Logger {
         case session = "Session"
         case squads = "Squads"  // Renommé de 'squad' à 'squads' pour éviter ambiguïté
         case network = "Network"
+        case service = "Service"  // Pour les services généraux (SessionService, etc.)
     }
     
     /// Log un message dans la console avec catégorisation

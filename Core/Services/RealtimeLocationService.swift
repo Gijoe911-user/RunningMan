@@ -50,6 +50,7 @@ final class RealtimeLocationService: ObservableObject {
     // MARK: - Contexte
     
     func setContext(squadId: String) {
+        Logger.log("🔧 RealtimeLocationService.setContext appelé avec squadId: \(squadId)", category: .location)
         membershipRepository.setCurrentSquadId(squadId)
         observeActiveSession(for: squadId)
         bindOwnLocation()

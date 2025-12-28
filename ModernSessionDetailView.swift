@@ -7,6 +7,7 @@
 
 import SwiftUI
 import MapKit
+import FirebaseFirestore
 
 struct ModernSessionDetailView: View {
     let session: SessionModel
@@ -25,7 +26,7 @@ struct ModernSessionDetailView: View {
         ZStack {
             // Background avec dégradé
             LinearGradient(
-                colors: [Color.darkNavy, Color.darkNavy.opacity(0.8)],
+                colors: [Color.darkNavy, Color(red: 0.11, green: 0.14, blue: 0.2, opacity: 0.8)],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -78,17 +79,13 @@ struct ModernSessionDetailView: View {
             
             ToolbarItem(placement: .topBarTrailing) {
                 if canEndSession {
-                    Button {
-                        showEndSessionConfirmation = true
-                    } label: {
-                        GlassButton(
-                            icon: "stop.fill",
-                            action: { showEndSessionConfirmation = true },
-                            size: 40,
-                            iconSize: 18,
-                            tint: .red
-                        )
-                    }
+                    GlassButton(
+                        icon: "stop.fill",
+                        action: { showEndSessionConfirmation = true },
+                        size: 40,
+                        iconSize: 18,
+                        tint: .red
+                    )
                 }
             }
         }
@@ -162,7 +159,7 @@ struct ModernSessionDetailView: View {
                             action: { /* TODO: Center on user */ },
                             size: 44,
                             iconSize: 20,
-                            tint: .coralAccent
+                            tint: Color(red: 1.0, green: 0.42, blue: 0.42)
                         )
                     }
                     .padding(.trailing, Spacing.lg)
@@ -222,7 +219,7 @@ struct ModernSessionDetailView: View {
                         
                         Text(formatDuration(session.startedAt))
                             .font(.sectionTitle)
-                            .foregroundColor(.coralAccent)
+                            .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
                     }
                 }
             }
@@ -234,31 +231,31 @@ struct ModernSessionDetailView: View {
     private var quickStatsCard: some View {
         GlassCard {
             HStack(spacing: Spacing.xl) {
-                StatItem(
+                SessionStatItem(
                     icon: "figure.run",
                     value: "5.2",
                     unit: "km",
-                    color: .coralAccent
+                    color: Color(red: 1.0, green: 0.42, blue: 0.42)
                 )
                 
                 Divider()
                     .background(Color.white.opacity(0.2))
                 
-                StatItem(
+                SessionStatItem(
                     icon: "speedometer",
                     value: "5'30\"",
                     unit: "/km",
-                    color: .blueAccent
+                    color: Color(red: 0.28, green: 0.67, blue: 0.93)
                 )
                 
                 Divider()
                     .background(Color.white.opacity(0.2))
                 
-                StatItem(
+                SessionStatItem(
                     icon: "flame.fill",
                     value: "245",
                     unit: "kcal",
-                    color: .yellowAccent
+                    color: Color(red: 0.98, green: 0.8, blue: 0.27)
                 )
             }
         }
@@ -413,7 +410,7 @@ struct ModernSessionDetailView: View {
 
 // MARK: - Stat Item
 
-struct StatItem: View {
+struct SessionStatItem: View {
     let icon: String
     let value: String
     let unit: String
@@ -426,12 +423,12 @@ struct StatItem: View {
                 .foregroundColor(color)
             
             Text(value)
-                .font(.stat(size: 24))
+                .font(Font.system(size: 24, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
             
             Text(unit)
-                .font(.smallLabel)
-                .foregroundColor(.white.opacity(0.6))
+                .font(Font.system(size: 11, weight: .medium))
+                .foregroundColor(Color.white.opacity(0.6))
         }
         .frame(maxWidth: .infinity)
     }
@@ -458,9 +455,9 @@ struct ModernParticipantRow: View {
                 // Avatar
                 ParticipantBadge(
                     imageURL: nil,
-                    initial: displayName.prefix(1).uppercased(),
+                    initial: String(displayName.prefix(1).uppercased()),
                     size: 44,
-                    borderColor: isSelected ? .coralAccent : .white,
+                    borderColor: isSelected ? Color(red: 1.0, green: 0.42, blue: 0.42) : .white,
                     borderWidth: isSelected ? 3 : 2
                 )
                 
@@ -486,13 +483,13 @@ struct ModernParticipantRow: View {
                 if isSelected {
                     Image(systemName: "location.fill")
                         .font(.system(size: 16))
-                        .foregroundColor(.coralAccent)
+                        .foregroundColor(Color(red: 1.0, green: 0.42, blue: 0.42))
                 }
             }
             .padding(Spacing.sm)
             .background(
                 RoundedRectangle(cornerRadius: CornerRadius.medium)
-                    .fill(isSelected ? Color.coralAccent.opacity(0.15) : Color.white.opacity(0.05))
+                    .fill(isSelected ? Color(red: 1.0, green: 0.42, blue: 0.42, opacity: 0.15) : Color.white.opacity(0.05))
             )
         }
         .buttonStyle(.plain)

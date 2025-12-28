@@ -1,20 +1,34 @@
-//
-//  SessionService.swift
-//  RunningMan
-//
-//  Created by AI Assistant on 24/12/2025.
-//
-
 import Foundation
 import FirebaseFirestore
 
-/// Service de gestion des sessions de course
-/// Gère la création, pause, reprise, fin et observation des sessions
+// MARK: - Session Errors
+
+enum SessionError: LocalizedError {
+    case sessionNotFound
+    case invalidSession
+    case notAuthorized
+    case alreadyJoined
+    case alreadyEnded
+    
+    var errorDescription: String? {
+        switch self {
+        case .sessionNotFound: return "Session introuvable"
+        case .invalidSession: return "Session invalide"
+        case .notAuthorized: return "Non autorisé"
+        case .alreadyJoined: return "Déjà participant"
+        case .alreadyEnded: return "Session terminée"
+        }
+    }
+}
+
 class SessionService {
     
     static let shared = SessionService()
     
-    private let db = Firestore.firestore()
+    // Computed property pour éviter le crash Firebase au démarrage
+    private var db: Firestore {
+        Firestore.firestore()
+    }
     
     private init() {
         Logger.log("SessionService initialisé", category: .session)
@@ -22,229 +36,224 @@ class SessionService {
     
     // MARK: - Create Session
     
-    /// Crée une nouvelle session de course
-    /// - Parameters:
-    ///   - squadId: ID de la squad
-    ///   - creatorId: ID de l'utilisateur qui crée la session
-    ///   - title: Titre de la session (optionnel)
-    ///   - sessionType: Type de session (training, race, casual)
-    ///   - targetDistance: Distance cible en mètres (optionnel)
-    /// - Returns: SessionModel créé avec son ID
     func createSession(
         squadId: String,
         creatorId: String,
-        title: String? = nil,
-        sessionType: SessionType = .training,
-        targetDistance: Double? = nil
+        startLocation: GeoPoint? = nil
     ) async throws -> SessionModel {
         
         Logger.log("Création d'une nouvelle session pour squad: \(squadId)", category: .session)
+        print("🔨 createSession appelé pour squadId: \(squadId)")
         
-        // 1. Créer le modèle de session
         var session = SessionModel(
             squadId: squadId,
             creatorId: creatorId,
             startedAt: Date(),
             status: .active,
-            participants: [creatorId], // Le créateur est automatiquement participant
-            targetDistanceMeters: targetDistance,
-            title: title,
-            sessionType: sessionType
+            participants: [creatorId],
+            startLocation: startLocation
         )
         
-        // 2. Créer le document dans Firestore
         let sessionRef = db.collection("sessions").document()
         session.id = sessionRef.documentID
         
+        print("💾 Enregistrement session dans Firestore: \(sessionRef.documentID)")
         try sessionRef.setData(from: session)
-        
-        // 3. Ajouter la session aux activeSessions de la squad
         try await addSessionToSquad(squadId: squadId, sessionId: sessionRef.documentID)
         
         Logger.logSuccess("Session créée avec succès: \(sessionRef.documentID)", category: .session)
-        
+        print("✅ Session enregistrée - ID: \(sessionRef.documentID), Status: \(session.status.rawValue), SquadId: \(session.squadId)")
         return session
     }
     
-    // MARK: - End Session
+    // MARK: - Join / Leave / Status
     
-    /// Termine une session
-    /// - Parameters:
-    ///   - sessionId: ID de la session à terminer
-    ///   - finalDistance: Distance finale en mètres
-    func endSession(sessionId: String, finalDistance: Double? = nil) async throws {
-        
-        Logger.log("Fin de la session: \(sessionId)", category: .session)
-        
-        // 1. Récupérer la session
-        guard var session = try await getSession(sessionId: sessionId) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        // 2. Mettre à jour le statut et la date de fin
-        session.status = .ended
-        session.endedAt = Date()
-        
-        // 3. Calculer la durée finale
-        session.durationSeconds = Date().timeIntervalSince(session.startedAt)
-        
-        // 4. Mettre à jour la distance finale si fournie
-        if let finalDistance = finalDistance {
-            session.totalDistanceMeters = finalDistance
-        }
-        
-        // 5. Sauvegarder dans Firestore
-        try await updateSession(session)
-        
-        // 6. Retirer la session des activeSessions de la squad
-        try await removeSessionFromSquad(squadId: session.squadId, sessionId: sessionId)
-        
-        Logger.logSuccess("Session terminée: \(sessionId)", category: .session)
-    }
-    
-    // MARK: - Pause/Resume Session
-    
-    /// Met en pause une session
-    func pauseSession(sessionId: String) async throws {
-        guard var session = try await getSession(sessionId: sessionId) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        guard session.status == .active else {
-            throw SessionError.invalidSessionStatus
-        }
-        
-        session.status = .paused
-        try await updateSession(session)
-        
-        Logger.log("Session mise en pause: \(sessionId)", category: .session)
-    }
-    
-    /// Reprend une session en pause
-    func resumeSession(sessionId: String) async throws {
-        guard var session = try await getSession(sessionId: sessionId) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        guard session.status == .paused else {
-            throw SessionError.invalidSessionStatus
-        }
-        
-        session.status = .active
-        try await updateSession(session)
-        
-        Logger.log("Session reprise: \(sessionId)", category: .session)
-    }
-    
-    // MARK: - Join/Leave Session
-    
-    /// Rejoindre une session en cours
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur qui rejoint
     func joinSession(sessionId: String, userId: String) async throws {
+        let sessionRef = db.collection("sessions").document(sessionId)
         
-        Logger.log("Utilisateur \(userId) rejoint la session \(sessionId)", category: .session)
+        try await sessionRef.updateData([
+            "participants": FieldValue.arrayUnion([userId]),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
         
-        guard var session = try await getSession(sessionId: sessionId) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        // Vérifier que la session est active
-        guard session.status == .active else {
-            throw SessionError.sessionNotActive
-        }
-        
-        // Ajouter l'utilisateur aux participants
-        session.addParticipant(userId: userId)
-        
-        try await updateSession(session)
-        
-        Logger.logSuccess("Utilisateur \(userId) a rejoint la session", category: .session)
+        // Stats initiales pour le participant
+        let statsRef = sessionRef.collection("participantStats").document(userId)
+        let stats = ParticipantStats(
+            userId: userId,
+            distance: 0,
+            duration: 0,
+            averageSpeed: 0,
+            maxSpeed: 0,
+            locationPointsCount: 0,
+            joinedAt: Date()
+        )
+        try statsRef.setData(from: stats)
     }
     
-    /// Quitter une session en cours
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur qui quitte
     func leaveSession(sessionId: String, userId: String) async throws {
-        
-        Logger.log("Utilisateur \(userId) quitte la session \(sessionId)", category: .session)
-        
-        guard var session = try await getSession(sessionId: sessionId) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        // Retirer l'utilisateur des participants
-        session.removeParticipant(userId: userId)
-        
-        try await updateSession(session)
-        
-        Logger.log("Utilisateur \(userId) a quitté la session", category: .session)
+        let sessionRef = db.collection("sessions").document(sessionId)
+        try await sessionRef.updateData([
+            "participants": FieldValue.arrayRemove([userId]),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+    }
+    
+    func pauseSession(sessionId: String) async throws {
+        try await db.collection("sessions").document(sessionId).updateData([
+            "status": SessionStatus.paused.rawValue,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+    }
+    
+    func resumeSession(sessionId: String) async throws {
+        try await db.collection("sessions").document(sessionId).updateData([
+            "status": SessionStatus.active.rawValue,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
     }
     
     // MARK: - Get Session
     
     /// Récupère une session par son ID
     func getSession(sessionId: String) async throws -> SessionModel? {
-        let sessionRef = db.collection("sessions").document(sessionId)
-        let document = try await sessionRef.getDocument()
+        let document = try await db.collection("sessions").document(sessionId).getDocument()
         
         guard document.exists else {
+            Logger.log("⚠️ Session introuvable: \(sessionId)", category: .service)
             return nil
         }
         
-        return try document.data(as: SessionModel.self)
+        let session = try document.data(as: SessionModel.self)
+        Logger.log("✅ Session récupérée: \(sessionId)", category: .service)
+        return session
+    }
+    
+    // MARK: - End Session
+    
+    func endSession(sessionId: String) async throws {
+        let sessionRef = db.collection("sessions").document(sessionId)
+        let document = try await sessionRef.getDocument()
+        guard let session = try? document.data(as: SessionModel.self) else { throw SessionError.sessionNotFound }
+        
+        let endTime = Date()
+        let duration = endTime.timeIntervalSince(session.startedAt)
+        
+        try await sessionRef.updateData([
+            "status": SessionStatus.ended.rawValue,
+            "endedAt": FieldValue.serverTimestamp(),
+            "durationSeconds": duration,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        try await removeSessionFromSquad(squadId: session.squadId, sessionId: sessionId)
+    }
+    
+    // MARK: - Update Participant Stats
+    
+    /// Met à jour les statistiques d'un participant dans une session
+    func updateParticipantStats(
+        sessionId: String,
+        userId: String,
+        distance: Double,
+        duration: TimeInterval,
+        averageSpeed: Double,
+        maxSpeed: Double
+    ) async throws {
+        let statsRef = db.collection("sessions")
+            .document(sessionId)
+            .collection("participantStats")
+            .document(userId)
+        
+        try await statsRef.updateData([
+            "distance": distance,
+            "duration": duration,
+            "averageSpeed": averageSpeed,
+            "maxSpeed": maxSpeed,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        Logger.log("📊 Stats participant mises à jour: \(userId)", category: .service)
+    }
+    
+    // MARK: - Update Session Stats (Aggregate)
+    
+    /// Met à jour les statistiques globales de la session (distance totale, etc.)
+    func updateSessionStats(
+        sessionId: String,
+        totalDistance: Double,
+        averageSpeed: Double
+    ) async throws {
+        try await db.collection("sessions").document(sessionId).updateData([
+            "totalDistanceMeters": totalDistance,
+            "averageSpeed": averageSpeed,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        Logger.log("📊 Stats session mises à jour", category: .service)
+    }
+    
+    /// Met à jour la durée de la session en temps réel
+    func updateSessionDuration(sessionId: String, duration: TimeInterval) async throws {
+        try await db.collection("sessions").document(sessionId).updateData([
+            "durationSeconds": duration,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
     }
     
     // MARK: - Get Active Session
     
-    /// Récupère la session active d'une squad (s'il y en a une)
+    /// Récupère la session active pour un squad donné (requête unique)
     func getActiveSession(squadId: String) async throws -> SessionModel? {
-        let sessionsRef = db.collection("sessions")
-        let query = sessionsRef
+        let query = db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
-            .whereField("status", isEqualTo: SessionStatus.active.rawValue)
+            .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+            .order(by: "startedAt", descending: true)
             .limit(to: 1)
         
         let snapshot = try await query.getDocuments()
-        
-        guard let document = snapshot.documents.first else {
-            return nil
-        }
-        
-        return try document.data(as: SessionModel.self)
+        return snapshot.documents.first.flatMap { try? $0.data(as: SessionModel.self) }
     }
+
+    // MARK: - Real-time Observation (Modern AsyncStream)
     
-    // MARK: - Observe Active Session
-    
-    /// Observe les changements de la session active d'une squad en temps réel
-    /// - Parameter squadId: ID de la squad
-    /// - Returns: AsyncStream qui émet les mises à jour de session
-    func observeActiveSession(squadId: String) -> AsyncStream<SessionModel?> {
+    /// Stream de toutes les sessions actives d'un squad
+    func streamActiveSessions(squadId: String) -> AsyncStream<[SessionModel]> {
         AsyncStream { continuation in
             let query = db.collection("sessions")
                 .whereField("squadId", isEqualTo: squadId)
-                .whereField("status", isEqualTo: SessionStatus.active.rawValue)
-                .limit(to: 1)
+                .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
             
-            let listener = query.addSnapshotListener { snapshot, error in
+            let listener = query.addSnapshotListener { snapshot, _ in
+                let sessions = snapshot?.documents.compactMap { try? $0.data(as: SessionModel.self) } ?? []
+                continuation.yield(sessions)
+            }
+            continuation.onTermination = { _ in listener.remove() }
+        }
+    }
+    
+    /// Stream d'une session active spécifique (avec mises à jour en temps réel)
+    func observeSession(sessionId: String) -> AsyncStream<SessionModel?> {
+        AsyncStream { continuation in
+            let docRef = db.collection("sessions").document(sessionId)
+            
+            let listener = docRef.addSnapshotListener { snapshot, error in
                 if let error = error {
-                    Logger.logError(error, context: "observeActiveSession", category: .session)
+                    Logger.logError(error, context: "observeSession", category: .service)
                     continuation.yield(nil)
                     return
                 }
                 
-                guard let document = snapshot?.documents.first else {
+                guard let snapshot = snapshot, snapshot.exists else {
+                    Logger.log("⚠️ Session \(sessionId) introuvable", category: .service)
                     continuation.yield(nil)
                     return
                 }
                 
-                do {
-                    let session = try document.data(as: SessionModel.self)
+                if let session = try? snapshot.data(as: SessionModel.self) {
+                    Logger.log("🔄 Session \(sessionId) mise à jour", category: .service)
                     continuation.yield(session)
-                } catch {
-                    Logger.logError(error, context: "decode session", category: .session)
+                } else {
+                    Logger.log("⚠️ Échec décodage session \(sessionId)", category: .service)
                     continuation.yield(nil)
                 }
             }
@@ -255,126 +264,109 @@ class SessionService {
         }
     }
     
-    // MARK: - Update Session
-    
-    /// Met à jour une session dans Firestore
-    func updateSession(_ session: SessionModel) async throws {
-        guard let sessionId = session.id else {
-            throw SessionError.invalidSessionId
+    /// Stream de la session active d'un squad (une seule)
+    func observeActiveSession(squadId: String) -> AsyncStream<SessionModel?> {
+        print("🔍 observeActiveSession démarré pour squadId: \(squadId)")
+        return AsyncStream { continuation in
+            let query = db.collection("sessions")
+                .whereField("squadId", isEqualTo: squadId)
+                .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+                .order(by: "startedAt", descending: true)
+                .limit(to: 1)
+            
+            let listener = query.addSnapshotListener { snapshot, error in
+                if let error = error {
+                    print("❌ ERROR observeActiveSession: \(error.localizedDescription)")
+                    // NE PAS TERMINER LE STREAM - juste yield nil et continuer
+                    continuation.yield(nil)
+                    return
+                }
+                
+                print("📦 Snapshot reçu: \(snapshot?.documents.count ?? 0) document(s)")
+                
+                if let doc = snapshot?.documents.first {
+                    print("📄 Document trouvé: \(doc.documentID)")
+                    if let session = try? doc.data(as: SessionModel.self) {
+                        print("✅ Session décodée: \(session.id ?? "no-id") - status: \(session.status.rawValue)")
+                        continuation.yield(session)
+                    } else {
+                        print("⚠️ Échec décodage session")
+                        continuation.yield(nil)
+                    }
+                } else {
+                    print("⚠️ Aucun document trouvé")
+                    continuation.yield(nil)
+                }
+            }
+            continuation.onTermination = { @Sendable _ in
+                print("🛑 observeActiveSession terminé")
+                listener.remove()
+            }
         }
-        
-        let sessionRef = db.collection("sessions").document(sessionId)
-        try sessionRef.setData(from: session, merge: true)
     }
-    
-    /// Met à jour la distance totale d'une session
-    func updateDistance(sessionId: String, distanceMeters: Double) async throws {
-        let sessionRef = db.collection("sessions").document(sessionId)
-        try await sessionRef.updateData([
-            "totalDistanceMeters": distanceMeters
-        ])
-    }
-    
-    /// Met à jour la durée d'une session
-    func updateDuration(sessionId: String, durationSeconds: TimeInterval) async throws {
-        let sessionRef = db.collection("sessions").document(sessionId)
-        try await sessionRef.updateData([
-            "durationSeconds": durationSeconds
-        ])
-    }
-    
+
     // MARK: - Get Session History
     
-    /// Récupère l'historique des sessions d'une squad
-    /// - Parameters:
-    ///   - squadId: ID de la squad
-    ///   - limit: Nombre maximum de sessions à récupérer
-    /// - Returns: Liste des sessions triées par date (plus récente en premier)
-    func getSessionHistory(squadId: String, limit: Int = 20) async throws -> [SessionModel] {
-        let sessionsRef = db.collection("sessions")
-        let query = sessionsRef
+    /// Récupère l'historique des sessions d'un squad
+    func getSessionHistory(squadId: String, limit: Int = 50) async throws -> [SessionModel] {
+        Logger.log("📜 Récupération historique pour squad: \(squadId)", category: .service)
+        
+        let query = db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
             .whereField("status", isEqualTo: SessionStatus.ended.rawValue)
+            .order(by: "endedAt", descending: true)
+            .limit(to: limit)
+        
+        let snapshot = try await query.getDocuments()
+        let sessions = snapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
+        
+        Logger.logSuccess("✅ \(sessions.count) sessions historiques récupérées", category: .service)
+        return sessions
+    }
+    
+    /// Récupère toutes les sessions actives d'un squad
+    func getActiveSessions(squadId: String) async throws -> [SessionModel] {
+        Logger.log("🔍 Récupération sessions actives pour squad: \(squadId)", category: .service)
+        
+        let query = db.collection("sessions")
+            .whereField("squadId", isEqualTo: squadId)
+            .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+            .order(by: "startedAt", descending: true)
+        
+        let snapshot = try await query.getDocuments()
+        let sessions = snapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
+        
+        Logger.logSuccess("✅ \(sessions.count) sessions actives trouvées", category: .service)
+        return sessions
+    }
+    
+    /// Récupère toutes les sessions (actives + historique) d'un squad
+    func getAllSessions(squadId: String, limit: Int = 100) async throws -> [SessionModel] {
+        Logger.log("📚 Récupération toutes sessions pour squad: \(squadId)", category: .service)
+        
+        let query = db.collection("sessions")
+            .whereField("squadId", isEqualTo: squadId)
             .order(by: "startedAt", descending: true)
             .limit(to: limit)
         
         let snapshot = try await query.getDocuments()
+        let sessions = snapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
         
-        var sessions: [SessionModel] = []
-        for document in snapshot.documents {
-            if let session = try? document.data(as: SessionModel.self) {
-                sessions.append(session)
-            }
-        }
-        
-        Logger.log("Sessions récupérées pour squad \(squadId): \(sessions.count)", category: .session)
-        
+        Logger.logSuccess("✅ \(sessions.count) sessions totales récupérées", category: .service)
         return sessions
     }
+
+    // MARK: - Helpers
     
-    // MARK: - Helper Methods
-    
-    /// Ajoute une session aux activeSessions d'une squad
     private func addSessionToSquad(squadId: String, sessionId: String) async throws {
-        let squadRef = db.collection("squads").document(squadId)
-        try await squadRef.updateData([
+        try await db.collection("squads").document(squadId).updateData([
             "activeSessions": FieldValue.arrayUnion([sessionId])
         ])
     }
     
-    /// Retire une session des activeSessions d'une squad
     private func removeSessionFromSquad(squadId: String, sessionId: String) async throws {
-        let squadRef = db.collection("squads").document(squadId)
-        try await squadRef.updateData([
+        try await db.collection("squads").document(squadId).updateData([
             "activeSessions": FieldValue.arrayRemove([sessionId])
         ])
-    }
-    
-    // MARK: - Delete Session
-    
-    /// Supprime une session (admin uniquement, use with caution)
-    func deleteSession(sessionId: String) async throws {
-        // Récupérer la session pour obtenir le squadId
-        guard let session = try await getSession(sessionId: sessionId) else {
-            throw SessionError.sessionNotFound
-        }
-        
-        // Retirer des activeSessions de la squad
-        try await removeSessionFromSquad(squadId: session.squadId, sessionId: sessionId)
-        
-        // Supprimer le document
-        let sessionRef = db.collection("sessions").document(sessionId)
-        try await sessionRef.delete()
-        
-        Logger.logSuccess("Session supprimée: \(sessionId)", category: .session)
-    }
-}
-
-// MARK: - SessionError
-
-/// Erreurs personnalisées pour les sessions
-enum SessionError: LocalizedError {
-    case sessionNotFound
-    case invalidSessionId
-    case invalidSessionStatus
-    case sessionNotActive
-    case notAParticipant
-    case alreadyParticipant
-    
-    var errorDescription: String? {
-        switch self {
-        case .sessionNotFound:
-            return "Session introuvable"
-        case .invalidSessionId:
-            return "ID de session invalide"
-        case .invalidSessionStatus:
-            return "Statut de session invalide pour cette opération"
-        case .sessionNotActive:
-            return "La session n'est pas active"
-        case .notAParticipant:
-            return "Vous ne participez pas à cette session"
-        case .alreadyParticipant:
-            return "Vous participez déjà à cette session"
-        }
     }
 }

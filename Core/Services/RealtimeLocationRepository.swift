@@ -33,14 +33,48 @@ final class RealtimeLocationRepository: RealtimeLocationRepositoryProtocol {
         let docRef = db.collection("sessions").document(sessionId)
             .collection("locations").document(userId)
         
-        let payload: [String: Any] = [
+        // Récupérer le nom de l'utilisateur
+        let displayName = try await getUserDisplayName(userId: userId)
+        let photoURL = try? await getUserPhotoURL(userId: userId)
+        
+        var payload: [String: Any] = [
             "userId": userId,
             "latitude": coordinate.latitude,
             "longitude": coordinate.longitude,
-            "timestamp": Timestamp(date: Date())
+            "timestamp": Timestamp(date: Date()),
+            "displayName": displayName
         ]
         
+        // Ajouter photoURL si disponible
+        if let photoURL = photoURL {
+            payload["photoURL"] = photoURL
+        }
+        
         try await docRef.setData(payload, merge: true)
+    }
+    
+    // MARK: - Helpers
+    
+    private func getUserDisplayName(userId: String) async throws -> String {
+        let userDoc = try await db.collection("users").document(userId).getDocument()
+        
+        if let data = userDoc.data(),
+           let displayName = data["displayName"] as? String {
+            return displayName
+        }
+        
+        return "Coureur" // Fallback
+    }
+    
+    private func getUserPhotoURL(userId: String) async throws -> String? {
+        let userDoc = try await db.collection("users").document(userId).getDocument()
+        
+        if let data = userDoc.data(),
+           let photoURL = data["photoURL"] as? String {
+            return photoURL
+        }
+        
+        return nil
     }
     
     func observeRunnerLocations(sessionId: String) -> AsyncStream<[RunnerLocation]> {

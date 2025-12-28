@@ -24,7 +24,7 @@ struct RouteHistoryView: View {
             
             VStack(spacing: 0) {
                 // Map with selected route
-                if let selectedRoute = selectedRoute {
+                if selectedRoute != nil {
                     mapSection
                         .frame(height: 300)
                 }
@@ -48,7 +48,7 @@ struct RouteHistoryView: View {
                 // Route polyline
                 if selectedRoutePoints.count > 1 {
                     MapPolyline(coordinates: selectedRoutePoints.map { $0.coordinate })
-                        .stroke(.coralAccent, lineWidth: 3)
+                        .stroke(Color.coralAccent, lineWidth: 3)
                 }
                 
                 // Start marker
