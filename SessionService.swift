@@ -175,6 +175,54 @@ class SessionService {
         Logger.log("📊 Stats participant mises à jour: \(userId)", category: .service)
     }
     
+    /// 🆕 Met à jour les stats biométriques en temps réel (HealthKit)
+    func updateParticipantLiveStats(
+        sessionId: String,
+        userId: String,
+        stats: ParticipantStats
+    ) async throws {
+        let statsRef = db.collection("sessions")
+            .document(sessionId)
+            .collection("participantStats")
+            .document(userId)
+        
+        // Créer un dictionnaire avec seulement les champs non-nil
+        var updateData: [String: Any] = [
+            "userId": userId,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        
+        // Ajouter les champs biométriques s'ils sont présents
+        if let heartRate = stats.currentHeartRate {
+            updateData["currentHeartRate"] = heartRate
+        }
+        if let avgHeartRate = stats.averageHeartRate {
+            updateData["averageHeartRate"] = avgHeartRate
+        }
+        if let maxHeartRate = stats.maxHeartRate {
+            updateData["maxHeartRate"] = maxHeartRate
+        }
+        if let minHeartRate = stats.minHeartRate {
+            updateData["minHeartRate"] = minHeartRate
+        }
+        if let calories = stats.calories {
+            updateData["calories"] = calories
+        }
+        if let heartRateUpdatedAt = stats.heartRateUpdatedAt {
+            updateData["heartRateUpdatedAt"] = Timestamp(date: heartRateUpdatedAt)
+        }
+        
+        // Ajouter distance si présente
+        if stats.distance > 0 {
+            updateData["distance"] = stats.distance
+        }
+        
+        // Mettre à jour (ou créer si n'existe pas)
+        try await statsRef.setData(updateData, merge: true)
+        
+        Logger.log("❤️ Stats biométriques mises à jour: \(userId) - BPM: \(stats.currentHeartRate ?? 0)", category: .service)
+    }
+    
     // MARK: - Update Session Stats (Aggregate)
     
     /// Met à jour les statistiques globales de la session (distance totale, etc.)

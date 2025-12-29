@@ -29,6 +29,7 @@ enum Logger {
         case squads = "Squads"  // Renommé de 'squad' à 'squads' pour éviter ambiguïté
         case network = "Network"
         case service = "Service"  // Pour les services généraux (SessionService, etc.)
+        case health = "Health"  // Pour HealthKit et les métriques de santé
     }
     
     /// Log un message dans la console avec catégorisation

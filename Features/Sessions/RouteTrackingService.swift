@@ -21,6 +21,11 @@ class RouteTrackingService {
     // Tracé en cours (en mémoire)
     private var currentRoutePoints: [CLLocationCoordinate2D] = []
     
+    // Timer pour sauvegarde automatique
+    private var autoSaveTimer: Timer?
+    private var currentSessionId: String?
+    private var currentUserId: String?
+    
     private init() {}
     
     // MARK: - Record Route Points
@@ -40,6 +45,49 @@ class RouteTrackingService {
     func clearRoute() {
         currentRoutePoints.removeAll()
         Logger.log("🗑️ Tracé réinitialisé", category: .location)
+    }
+    
+    // MARK: - Auto-Save
+    
+    /// Démarre la sauvegarde automatique du tracé toutes les 30 secondes
+    func startAutoSave(sessionId: String, userId: String) {
+        currentSessionId = sessionId
+        currentUserId = userId
+        
+        // Annuler le timer précédent si existant
+        stopAutoSave()
+        
+        // Créer un nouveau timer (toutes les 30 secondes)
+        autoSaveTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+            Task {
+                await self?.autoSaveRoute()
+            }
+        }
+        
+        Logger.log("🔄 Auto-sauvegarde activée (30s)", category: .location)
+    }
+    
+    /// Arrête la sauvegarde automatique
+    func stopAutoSave() {
+        autoSaveTimer?.invalidate()
+        autoSaveTimer = nil
+        Logger.log("⏸️ Auto-sauvegarde désactivée", category: .location)
+    }
+    
+    /// Sauvegarde automatique silencieuse
+    private func autoSaveRoute() async {
+        guard let sessionId = currentSessionId,
+              let userId = currentUserId,
+              !currentRoutePoints.isEmpty else {
+            return
+        }
+        
+        do {
+            try await saveRoute(sessionId: sessionId, userId: userId)
+            Logger.log("💾 Auto-sauvegarde réussie (\(currentRoutePoints.count) points)", category: .location)
+        } catch {
+            Logger.logError(error, context: "autoSaveRoute", category: .location)
+        }
     }
     
     // MARK: - Save Route to Firestore

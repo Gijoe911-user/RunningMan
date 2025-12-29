@@ -68,8 +68,30 @@ struct ActiveSessionDetailView: View {
     private var mapSection: some View {
         EnhancedSessionMapView(
             userLocation: viewModel.userLocation,
-            runnerLocations: viewModel.runnerLocations
+            runnerLocations: viewModel.runnerLocations,
+            routeCoordinates: viewModel.routeCoordinates  // ✅ AJOUTÉ
         )
+        .onAppear {
+            // ✅ DEBUG pour ActiveSessionDetailView
+            print("🗺️ DETAIL - userLocation: \(viewModel.userLocation != nil ? "✅" : "❌")")
+            print("🗺️ DETAIL - runnerLocations: \(viewModel.runnerLocations.count)")
+            print("🗺️ DETAIL - routeCoordinates: \(viewModel.routeCoordinates.count) points")
+            
+            if viewModel.routeCoordinates.isEmpty {
+                print("⚠️⚠️⚠️ DETAIL: routeCoordinates est VIDE !")
+            } else {
+                print("✅✅✅ DETAIL: routeCoordinates contient \(viewModel.routeCoordinates.count) points")
+                if let first = viewModel.routeCoordinates.first {
+                    print("   Premier: \(first.latitude), \(first.longitude)")
+                }
+                if let last = viewModel.routeCoordinates.last {
+                    print("   Dernier: \(last.latitude), \(last.longitude)")
+                }
+            }
+        }
+        .onChange(of: viewModel.routeCoordinates.count) { oldCount, newCount in
+            print("🗺️ DETAIL - Route mise à jour: \(oldCount) → \(newCount) points")
+        }
         .overlay(alignment: .topTrailing) {
             // Status indicator
             HStack(spacing: 8) {

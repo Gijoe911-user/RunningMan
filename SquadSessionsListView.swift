@@ -211,6 +211,7 @@ struct SquadSessionsListView: View {
         }
         
         isLoading = true
+        errorMessage = nil  // Reset l'erreur précédente
         
         do {
             // Charger les sessions actives
@@ -222,8 +223,17 @@ struct SquadSessionsListView: View {
             Logger.logSuccess("✅ Sessions chargées: \(activeSessions.count) actives, \(historySessions.count) historique", category: .service)
             isLoading = false
         } catch {
-            Logger.logError(error, context: "loadSessions", category: .service)
-            errorMessage = "Impossible de charger les sessions"
+            Logger.logError(error, context: "loadSessions - squadId: \(squadId)", category: .service)
+            
+            // Message d'erreur plus informatif
+            if activeSessions.isEmpty && historySessions.isEmpty {
+                // Peut-être simplement qu'il n'y a pas de sessions (ce n'est pas une erreur)
+                errorMessage = nil  // Pas d'erreur, juste vide
+                Logger.log("ℹ️ Aucune session trouvée pour ce squad", category: .service)
+            } else {
+                errorMessage = "Erreur de chargement: \(error.localizedDescription)"
+            }
+            
             isLoading = false
         }
     }

@@ -45,7 +45,7 @@ struct SessionHistoryView: View {
         ScrollView {
             LazyVStack(spacing: 12) {
                 ForEach(sessions) { session in
-                    NavigationLink(destination: ActiveSessionDetailView(session: session)) {
+                    NavigationLink(destination: SessionHistoryDetailMapView(session: session)) {
                         SessionHistoryCard(session: session)
                     }
                     .buttonStyle(.plain)

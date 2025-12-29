@@ -34,11 +34,52 @@ struct SessionsListView: View {
                     }
                 )
                 .ignoresSafeArea(edges: .top)
+                .onAppear {
+                    // DEBUG: Vérifier les données
+                    print("🗺️ DEBUG - userLocation: \(viewModel.userLocation != nil ? "✅" : "❌")")
+                    print("🗺️ DEBUG - activeRunners: \(viewModel.activeRunners.count)")
+                    print("🗺️ DEBUG - routeCoordinates: \(viewModel.routeCoordinates.count) points")
+                    
+                    // ✅ FORCER UN LOG VISIBLE
+                    if viewModel.routeCoordinates.isEmpty {
+                        print("⚠️⚠️⚠️ ATTENTION: routeCoordinates est VIDE !")
+                    } else {
+                        print("✅✅✅ routeCoordinates contient \(viewModel.routeCoordinates.count) points")
+                        print("   Premier: \(viewModel.routeCoordinates.first!)")
+                        print("   Dernier: \(viewModel.routeCoordinates.last!)")
+                    }
+                }
+                .onChange(of: viewModel.routeCoordinates.count) { oldCount, newCount in
+                    print("🗺️ DEBUG - Route mise à jour: \(oldCount) → \(newCount) points")
+                    if newCount > 0 {
+                        print("🗺️ DEBUG - Premier point: \(viewModel.routeCoordinates.first!.latitude), \(viewModel.routeCoordinates.first!.longitude)")
+                        if newCount > 1 {
+                            print("🗺️ DEBUG - Dernier point: \(viewModel.routeCoordinates.last!.latitude), \(viewModel.routeCoordinates.last!.longitude)")
+                        }
+                    }
+                }
                 
                 // Overlay conditionnel selon l'état de la session
                 if let session = viewModel.activeSession {
                     // Session active : afficher l'overlay avec infos + participants
                     VStack(spacing: 0) {
+                        Spacer()
+                        
+                        // 🆕 Widget de stats FLOTTANT en haut (très visible !)
+                        HStack {
+                            Spacer()
+                            SessionStatsWidget(
+                                session: session,
+                                currentHeartRate: viewModel.currentHeartRate,
+                                currentCalories: viewModel.currentCalories,
+                                routeDistance: calculateRouteDistance(from: viewModel.routeCoordinates)
+                            )
+                            .frame(maxWidth: 400)
+                            Spacer()
+                        }
+                        .padding(.top, 60)  // Sous la barre de navigation
+                        .padding(.horizontal)
+                        
                         Spacer()
                         
                         // Overlay des participants (en haut de l'overlay principal)
@@ -98,6 +139,25 @@ struct SessionsListView: View {
     }
     
     // MARK: - Actions
+    
+    /// Calcule la distance totale d'un tracé GPS
+    private func calculateRouteDistance(from coordinates: [CLLocationCoordinate2D]) -> Double {
+        guard coordinates.count >= 2 else { return 0 }
+        
+        var totalDistance: Double = 0
+        for i in 1..<coordinates.count {
+            let loc1 = CLLocation(
+                latitude: coordinates[i-1].latitude,
+                longitude: coordinates[i-1].longitude
+            )
+            let loc2 = CLLocation(
+                latitude: coordinates[i].latitude,
+                longitude: coordinates[i].longitude
+            )
+            totalDistance += loc1.distance(from: loc2)
+        }
+        return totalDistance
+    }
     
     private func saveCurrentRoute() {
         guard let session = viewModel.activeSession,

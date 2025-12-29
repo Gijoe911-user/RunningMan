@@ -208,6 +208,14 @@ struct ParticipantStats: Codable {
     var locationPointsCount: Int = 0
     var joinedAt: Date = Date()
     var leftAt: Date?
+    
+    // 🆕 HealthKit - Données biométriques
+    var currentHeartRate: Double?  // BPM actuel
+    var averageHeartRate: Double?  // BPM moyen
+    var maxHeartRate: Double?      // BPM max
+    var minHeartRate: Double?      // BPM min
+    var calories: Double?          // Calories brûlées
+    var heartRateUpdatedAt: Date?  // Dernière mise à jour
 }
 
 // MARK: - Location Point
