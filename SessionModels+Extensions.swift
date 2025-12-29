@@ -26,6 +26,8 @@ extension SessionModel {
             return "Run Solo"
         case .group:
             return "Run de Groupe"
+        case .none:
+            return "Spectateur"
         }
     }
     

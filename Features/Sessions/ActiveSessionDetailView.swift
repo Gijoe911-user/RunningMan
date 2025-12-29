@@ -15,6 +15,7 @@ struct ActiveSessionDetailView: View {
     @Environment(\.dismiss) private var dismiss
     
     @State private var showEndConfirmation = false
+    @State private var isEndingSession = false  // ✅ FIX: État pour désactiver le bouton
     
     var body: some View {
         ZStack {
@@ -36,12 +37,20 @@ struct ActiveSessionDetailView: View {
             if canEndSession {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showEndConfirmation = true
+                        if !isEndingSession {  // ✅ FIX: Vérifier l'état
+                            showEndConfirmation = true
+                        }
                     } label: {
-                        Text("Terminer")
-                            .foregroundColor(.red)
-                            .fontWeight(.semibold)
+                        if isEndingSession {
+                            ProgressView()
+                                .tint(.red)
+                        } else {
+                            Text("Terminer")
+                                .foregroundColor(.red)
+                                .fontWeight(.semibold)
+                        }
                     }
+                    .disabled(isEndingSession)  // ✅ FIX: Désactiver pendant la terminaison
                 }
             }
         }
@@ -56,10 +65,19 @@ struct ActiveSessionDetailView: View {
             Text("Cette action mettra fin à la session pour tous les participants.")
         }
         .task {
-            await viewModel.startObserving(sessionId: session.id ?? "")
+            // ✅ FIX: Ne démarrer l'observation que si l'ID existe
+            guard let sessionId = session.id, !sessionId.isEmpty else {
+                Logger.log("❌ Session ID manquant, impossible de démarrer l'observation", category: .session)
+                return
+            }
+            await viewModel.startObserving(sessionId: sessionId)
         }
         .onDisappear {
             viewModel.stopObserving()
+            
+            // ✅ FIX: Arrêter HealthKit monitoring quand on quitte la vue
+            HealthKitManager.shared.stopHeartRateQuery()
+            Logger.log("🛑 ActiveSessionDetailView: HealthKit arrêté", category: .general)
         }
     }
     
@@ -236,13 +254,32 @@ struct ActiveSessionDetailView: View {
     // MARK: - Actions
     
     private func endSession() async {
-        guard let sessionId = session.id else { return }
+        guard let sessionId = session.id else {
+            Logger.log("❌ Impossible de terminer : session.id est nil", category: .session)
+            return
+        }
+        
+        // ✅ FIX: Empêcher les clics multiples
+        guard !isEndingSession else {
+            Logger.log("⚠️ Terminaison déjà en cours, ignoré", category: .session)
+            return
+        }
+        
+        isEndingSession = true
+        Logger.log("🔴 Bouton Terminer appuyé pour session: \(sessionId)", category: .session)
         
         do {
             try await SessionService.shared.endSession(sessionId: sessionId)
+            Logger.logSuccess("✅ Session terminée, fermeture de la vue", category: .session)
+            
+            // ✅ Attendre un peu avant de fermer pour que le listener détecte le changement
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 seconde
+            
             dismiss()
         } catch {
-            print("Error ending session: \(error)")
+            Logger.logError(error, context: "endSession", category: .session)
+            print("❌ Error ending session: \(error)")
+            isEndingSession = false  // ✅ Réactiver en cas d'erreur
         }
     }
     
@@ -433,7 +470,18 @@ class ActiveSessionViewModel: ObservableObject {
                 await MainActor.run {
                     if let session = session {
                         self.currentSession = session
+                        Logger.log("🔄 Session \(sessionId) mise à jour", category: .service)
                         Logger.log("🔄 Session mise à jour: distance=\(session.totalDistanceMeters)m", category: .service)
+                        
+                        // ✅ FIX: Détecter si la session est terminée
+                        if session.status == .ended {
+                            Logger.log("🛑 Session terminée détectée, arrêt observation", category: .service)
+                            self.sessionObservationTask?.cancel()
+                            // Note: La vue sera fermée par dismiss() dans endSession()
+                        }
+                    } else {
+                        Logger.log("⚠️ Session \(sessionId) n'existe plus", category: .service)
+                        self.sessionObservationTask?.cancel()
                     }
                 }
             }

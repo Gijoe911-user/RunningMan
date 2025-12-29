@@ -231,14 +231,29 @@ struct CreateSessionView: View {
         isCreating = true
         
         Task {
+            // ✅ FIX: Timeout de 10 secondes pour la création
+            let timeoutTask = Task {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                if isCreating {
+                    Logger.log("⏱️ Timeout lors de la création de session", category: .session)
+                    isCreating = false
+                    errorMessage = "La création prend trop de temps. Vérifiez votre connexion."
+                }
+            }
+            
             do {
                 // Vérifier d'abord s'il existe déjà une session active
+                Logger.log("🔍 Vérification session active pour squad: \(squadId)", category: .session)
+                
                 if let existingSession = try await SessionService.shared.getActiveSession(squadId: squadId) {
                     Logger.log("⚠️ Une session active existe déjà: \(existingSession.id ?? "unknown")", category: .session)
+                    timeoutTask.cancel()
                     isCreating = false
                     errorMessage = "Une session est déjà active pour cette squad"
                     return
                 }
+                
+                Logger.log("🚀 Création de la session...", category: .session)
                 
                 // Créer la session via le service
                 let _ = try await SessionService.shared.createSession(
@@ -247,7 +262,10 @@ struct CreateSessionView: View {
                     startLocation: nil
                 )
                 
+                timeoutTask.cancel()
                 isCreating = false
+                
+                Logger.logSuccess("✅ Session créée avec succès", category: .session)
                 
                 // Fermer la sheet
                 dismiss()
@@ -258,8 +276,10 @@ struct CreateSessionView: View {
                 }
                 
             } catch {
+                timeoutTask.cancel()
                 isCreating = false
                 errorMessage = error.localizedDescription
+                Logger.logError(error, context: "createSession", category: .session)
             }
         }
     }

@@ -16,6 +16,7 @@ struct EnhancedSessionMapView: View {
     
     @State private var position: MapCameraPosition
     @State private var showAllRunners = false
+    @State private var use3DElevation = false  // ✅ NOUVEAU: Toggle 2D/3D
     
     // Actions callback
     var onRecenter: (() -> Void)?
@@ -102,7 +103,7 @@ struct EnhancedSessionMapView: View {
                     }
                 }
             }
-            .mapStyle(.standard(elevation: .realistic))
+            .mapStyle(.standard(elevation: use3DElevation ? .realistic : .flat))  // ✅ FIX: Toggle 2D/3D
             
             // Overlay avec infos et contrôles
             VStack {
@@ -233,6 +234,21 @@ struct EnhancedSessionMapView: View {
                 ) {
                     onSaveRoute?()
                 }
+            }
+            
+            // Bouton basculer 2D/3D (icône seule)
+            MapControlButton(
+                icon: use3DElevation ? "mountain.2.fill" : "map.fill",
+                color: use3DElevation ? .orange : .gray,
+                label: ""
+            ) {
+                withAnimation {
+                    use3DElevation.toggle()
+                }
+                
+                // Haptic feedback
+                let generator = UIImpactFeedbackGenerator(style: .medium)
+                generator.impactOccurred()
             }
         }
         .padding(.trailing, 12)

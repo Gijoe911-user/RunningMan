@@ -35,6 +35,10 @@ class HealthKitManager: ObservableObject {
     // Stats cumulatives pour la session
     private var heartRateSamples: [Double] = []
     
+    // ✅ THROTTLING: Limiter les mises à jour Firestore
+    private var lastFirestoreUpdate: Date?
+    private let firestoreUpdateInterval: TimeInterval = 5.0  // 5 secondes minimum entre chaque update
+    
     // MARK: - Initialization
     private init() {
         checkAvailability()
@@ -161,6 +165,7 @@ class HealthKitManager: ObservableObject {
         activeSessionId = nil
         sessionStartTime = nil
         heartRateSamples.removeAll()
+        lastFirestoreUpdate = nil  // ✅ FIX: Reset du throttle
         
         Task { @MainActor in
             self.currentHeartRate = nil
@@ -177,7 +182,10 @@ class HealthKitManager: ObservableObject {
             return
         }
         
-        for sample in samples {
+        // ✅ FIX: Limiter le nombre d'échantillons traités à 5 max par batch
+        let recentSamples = Array(samples.suffix(5))
+        
+        for sample in recentSamples {
             let heartRateUnit = HKUnit.count().unitDivided(by: .minute())
             let heartRate = sample.quantity.doubleValue(for: heartRateUnit)
             
@@ -192,25 +200,36 @@ class HealthKitManager: ObservableObject {
             let maxHeartRate = heartRateSamples.max() ?? heartRate
             let minHeartRate = heartRateSamples.min() ?? heartRate
             
-            Logger.log("❤️ BPM: \(Int(heartRate)) (moy: \(Int(averageHeartRate)), max: \(Int(maxHeartRate)))", category: .general)
+            // ✅ FIX: Logger seulement toutes les 5 secondes
+            let now = Date()
+            let shouldLog = lastFirestoreUpdate == nil || now.timeIntervalSince(lastFirestoreUpdate!) >= firestoreUpdateInterval
             
-            // Mettre à jour Firestore via SessionService
-            Task {
-                do {
-                    try await SessionService.shared.updateParticipantLiveStats(
-                        sessionId: sessionId,
-                        userId: userId,
-                        stats: ParticipantStats(
+            if shouldLog {
+                Logger.log("❤️ BPM: \(Int(heartRate)) (moy: \(Int(averageHeartRate)), max: \(Int(maxHeartRate)))", category: .general)
+            }
+            
+            // ✅ FIX: Mettre à jour Firestore UNIQUEMENT toutes les 5 secondes
+            if shouldLog {
+                lastFirestoreUpdate = now
+                
+                // Mettre à jour Firestore via SessionService
+                Task {
+                    do {
+                        try await SessionService.shared.updateParticipantLiveStats(
+                            sessionId: sessionId,
                             userId: userId,
-                            currentHeartRate: heartRate,
-                            averageHeartRate: averageHeartRate,
-                            maxHeartRate: maxHeartRate,
-                            minHeartRate: minHeartRate,
-                            heartRateUpdatedAt: Date()
+                            stats: ParticipantStats(
+                                userId: userId,
+                                currentHeartRate: heartRate,
+                                averageHeartRate: averageHeartRate,
+                                maxHeartRate: maxHeartRate,
+                                minHeartRate: minHeartRate,
+                                heartRateUpdatedAt: Date()
+                            )
                         )
-                    )
-                } catch {
-                    Logger.logError(error, context: "updateParticipantLiveStats", category: .general)
+                    } catch {
+                        Logger.logError(error, context: "updateParticipantLiveStats", category: .general)
+                    }
                 }
             }
         }

@@ -15,6 +15,7 @@ struct AllSessionsView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var showMap = false
+    @State private var hasLoaded = false  // ✅ FIX: Cache pour éviter de recharger
     
     var body: some View {
         NavigationStack {
@@ -54,8 +55,8 @@ struct AllSessionsView: View {
                     }
                 }
                 
-                // Bouton flottant pour voir la carte
-                if !activeSessions.isEmpty {
+                // Bouton flottant pour voir la carte (toujours visible si on a des squads)
+                if !squadVM.userSquads.isEmpty {
                     VStack {
                         Spacer()
                         HStack {
@@ -91,7 +92,11 @@ struct AllSessionsView: View {
                 SessionsListView()  // L'ancienne vue carte
             }
             .task {
-                await loadAllSessions()
+                // ✅ FIX: Ne charger qu'une seule fois
+                if !hasLoaded {
+                    await loadAllSessions()
+                    hasLoaded = true
+                }
             }
             .refreshable {
                 await loadAllSessions()
@@ -161,7 +166,7 @@ struct AllSessionsView: View {
                     .clipShape(Capsule())
             }
             
-            ForEach(activeSessions) { session in
+            ForEach(activeSessions.filter { $0.id != nil }) { session in
                 NavigationLink(destination: ActiveSessionDetailView(session: session)) {
                     ActiveSessionCard(session: session)
                 }
@@ -191,7 +196,7 @@ struct AllSessionsView: View {
                 }
             }
             
-            ForEach(recentHistory.prefix(5)) { session in
+            ForEach(recentHistory.prefix(5).filter { $0.id != nil }) { session in
                 NavigationLink(destination: SessionHistoryDetailView(session: session)) {
                     HistorySessionCard(session: session)
                 }
@@ -310,30 +315,45 @@ struct AllSessionsView: View {
         var allActiveSessions: [SessionModel] = []
         var allHistorySessions: [SessionModel] = []
         
-        await withTaskGroup(of: (active: [SessionModel]?, history: [SessionModel]?).self) { group in
-            for squad in userSquads {
-                guard let squadId = squad.id else { continue }
+        // ✅ FIX: Limiter à 2 requêtes parallèles max pour éviter de surcharger
+        let maxConcurrency = 2
+        var currentIndex = 0
+        
+        while currentIndex < userSquads.count {
+            let batch = Array(userSquads[currentIndex..<min(currentIndex + maxConcurrency, userSquads.count)])
+            
+            await withTaskGroup(of: (active: [SessionModel]?, history: [SessionModel]?).self) { group in
+                for squad in batch {
+                    guard let squadId = squad.id else { continue }
+                    
+                    group.addTask {
+                        let active = try? await SessionService.shared.getActiveSessions(squadId: squadId)
+                        let history = try? await SessionService.shared.getSessionHistory(squadId: squadId, limit: 10)
+                        return (active, history)
+                    }
+                }
                 
-                group.addTask {
-                    let active = try? await SessionService.shared.getActiveSessions(squadId: squadId)
-                    let history = try? await SessionService.shared.getSessionHistory(squadId: squadId, limit: 10)
-                    return (active, history)
+                for await result in group {
+                    if let active = result.active {
+                        allActiveSessions.append(contentsOf: active)
+                    }
+                    if let history = result.history {
+                        allHistorySessions.append(contentsOf: history)
+                    }
                 }
             }
             
-            for await result in group {
-                if let active = result.active {
-                    allActiveSessions.append(contentsOf: active)
-                }
-                if let history = result.history {
-                    allHistorySessions.append(contentsOf: history)
-                }
-            }
+            currentIndex += maxConcurrency
         }
         
         // Trier par date (plus récent en premier)
-        activeSessions = allActiveSessions.sorted { $0.startedAt > $1.startedAt }
-        recentHistory = allHistorySessions.sorted { ($0.endedAt ?? Date()) > ($1.endedAt ?? Date()) }
+        activeSessions = allActiveSessions
+            .filter { $0.id != nil }  // ✅ FIX: Filtrer les sessions sans ID
+            .sorted { $0.startedAt > $1.startedAt }
+        
+        recentHistory = allHistorySessions
+            .filter { $0.id != nil }  // ✅ FIX: Filtrer les sessions sans ID
+            .sorted { ($0.endedAt ?? Date()) > ($1.endedAt ?? Date()) }
         
         Logger.logSuccess("✅ Chargé: \(activeSessions.count) actives, \(recentHistory.count) historique", category: .service)
         isLoading = false

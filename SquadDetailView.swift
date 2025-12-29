@@ -50,6 +50,13 @@ struct SquadDetailView: View {
                 .padding(.horizontal, 20)
                 .padding(.top, 20)
             }
+            .refreshable {
+                // ✅ Invalider le cache lors du pull-to-refresh
+                if let squadId = squad.id {
+                    SessionService.shared.invalidateCache(squadId: squadId)
+                    Logger.log("🔄 Cache invalidé via pull-to-refresh", category: .ui)
+                }
+            }
         }
         .navigationTitle(squad.name)
         .navigationBarTitleDisplayMode(.inline)

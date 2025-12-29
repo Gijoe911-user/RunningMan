@@ -111,21 +111,61 @@ class SessionsViewModel: NSObject, ObservableObject {
     ///
     /// Cette méthode :
     /// 1. Arrête le tracking GPS
-    /// 2. Marque la session comme terminée dans Firebase
+    /// 2. Arrête l'auto-save des routes
     /// 3. Arrête le monitoring HealthKit
-    /// 4. Annule les tâches de rafraîchissement
+    /// 4. Attend 2 secondes pour que toutes les écritures se terminent
+    /// 5. Marque la session comme terminée dans Firebase
+    /// 6. Annule les tâches de rafraîchissement
     ///
     /// - Throws: `SessionError` si la terminaison échoue
     func endSession() async throws {
-        guard let session = activeSession, let sessionId = session.id else { return }
+        Logger.log("🔴 SessionsViewModel.endSession() appelé", category: .session)
         
-        Logger.log("🛑 Arrêt de la session...", category: .session)
+        guard let session = activeSession else {
+            Logger.log("⚠️ Aucune session active à terminer", category: .session)
+            return
+        }
+        
+        guard let sessionId = session.id else {
+            Logger.log("❌ Session ID manquant, impossible de terminer", category: .session)
+            throw SessionError.invalidSession
+        }
+        
+        Logger.log("🛑 Arrêt de la session \(sessionId)...", category: .session)
+        
+        // ✅ FIX CRITIQUE: Arrêter TOUTES les écritures AVANT de terminer
+        
+        // 1. Arrêter le tracking GPS
         LocationProvider.shared.stopUpdating()
+        Logger.log("✅ Tracking GPS arrêté", category: .session)
         
-        try await SessionService.shared.endSession(sessionId: sessionId)
+        // 2. Arrêter l'auto-save des routes (CRITIQUE !)
+        routeService.stopAutoSave()
+        Logger.log("✅ Auto-save routes arrêté", category: .session)
         
+        // 3. Arrêter le monitoring HealthKit
         stopHealthKitMonitoring()
+        Logger.log("✅ HealthKit arrêté", category: .session)
+        
+        // 4. Annuler le rafraîchissement des tracés
         routeRefreshTask?.cancel()
+        Logger.log("✅ Tâches de rafraîchissement annulées", category: .session)
+        
+        // ✅ FIX: Attendre 2 secondes pour que toutes les écritures en cours se terminent
+        Logger.log("⏳ Attente de 2 secondes pour finaliser les écritures...", category: .session)
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        Logger.log("✅ Attente terminée", category: .session)
+        
+        // 5. Terminer la session dans Firebase (maintenant que tout est arrêté)
+        do {
+            try await SessionService.shared.endSession(sessionId: sessionId)
+            Logger.logSuccess("✅ Session terminée dans Firebase", category: .session)
+        } catch {
+            Logger.logError(error, context: "SessionService.endSession", category: .session)
+            throw error
+        }
+        
+        Logger.logSuccess("✅✅ Session complètement terminée", category: .session)
     }
     
     // MARK: - Future Features (Stubs)

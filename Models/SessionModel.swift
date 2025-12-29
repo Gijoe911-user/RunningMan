@@ -21,27 +21,27 @@ struct SessionModel: Identifiable, Codable, Hashable {
     var status: SessionStatus
     var participants: [String]
     
-    // Champs fusionnés
+    // Statistiques
     var totalDistanceMeters: Double
     var durationSeconds: TimeInterval
     var averageSpeed: Double
     var startLocation: GeoPoint?
     var messageCount: Int
     
-    // Champs optionnels du modèle "vieux" mais utiles
+    // Champs optionnels
     var targetDistanceMeters: Double?
     var title: String?
     var notes: String?
-    var activityType: ActivityType  // Renommé de sessionType
+    var activityType: ActivityType
     
     // 🆕 NOUVEAUX CHAMPS - Refonte Incrément 3
-    var runType: RunType  // SOLO ou GROUP
-    var visibility: SessionVisibility  // PRIVATE ou SQUAD
-    var isJoinable: Bool  // Peut-on rejoindre cette session ?
-    var maxParticipants: Int?  // Limite de participants (optionnel)
+    var runType: RunType?
+    var visibility: SessionVisibility?
+    var isJoinable: Bool?
+    var maxParticipants: Int?
     
-    var createdAt: Date
-    var updatedAt: Date
+    var createdAt: Date?
+    var updatedAt: Date?
     
     // MARK: - Initialization
     
@@ -62,12 +62,12 @@ struct SessionModel: Identifiable, Codable, Hashable {
         title: String? = nil,
         notes: String? = nil,
         activityType: ActivityType = .training,
-        runType: RunType = .solo,  // 🆕
-        visibility: SessionVisibility = .squad,  // 🆕
-        isJoinable: Bool = true,  // 🆕
-        maxParticipants: Int? = nil,  // 🆕
-        createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        runType: RunType? = .solo,
+        visibility: SessionVisibility? = .squad,
+        isJoinable: Bool? = true,
+        maxParticipants: Int? = nil,
+        createdAt: Date? = nil,
+        updatedAt: Date? = nil
     ) {
         self.id = id
         self.squadId = squadId
@@ -85,13 +85,17 @@ struct SessionModel: Identifiable, Codable, Hashable {
         self.title = title
         self.notes = notes
         self.activityType = activityType
-        self.runType = runType  // 🆕
-        self.visibility = visibility  // 🆕
-        self.isJoinable = isJoinable  // 🆕
-        self.maxParticipants = maxParticipants  // 🆕
-        self.createdAt = createdAt
-        self.updatedAt = updatedAt
+        self.runType = runType
+        self.visibility = visibility
+        self.isJoinable = isJoinable
+        self.maxParticipants = maxParticipants
+        self.createdAt = createdAt ?? Date()
+        self.updatedAt = updatedAt ?? Date()
     }
+    
+    // ✅ @DocumentID gère automatiquement l'ID
+    // ✅ Pas de CodingKeys personnalisé
+    // ✅ Pas de init(from:) / encode(to:) personnalisé
     
     // MARK: - Computed Properties (Logique métier)
     

@@ -15,6 +15,7 @@ struct SquadSessionsListView: View {
     @State private var isLoading = true
     @State private var errorMessage: String?
     @State private var selectedTab: SessionTab = .active
+    @State private var hasLoaded = false  // ✅ FIX: Cache pour éviter de recharger
     
     enum SessionTab {
         case active
@@ -52,7 +53,11 @@ struct SquadSessionsListView: View {
         .navigationTitle("Sessions")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await loadSessions()
+            // ✅ FIX: Ne charger qu'une seule fois
+            if !hasLoaded {
+                await loadSessions()
+                hasLoaded = true
+            }
         }
         .refreshable {
             await loadSessions()
@@ -124,7 +129,7 @@ struct SquadSessionsListView: View {
                 if activeSessions.isEmpty {
                     emptyActiveSessionsView
                 } else {
-                    ForEach(activeSessions) { session in
+                    ForEach(activeSessions.filter { $0.id != nil }) { session in
                         NavigationLink(destination: ActiveSessionDetailView(session: session)) {
                             ActiveSessionCard(session: session)
                         }
@@ -144,7 +149,7 @@ struct SquadSessionsListView: View {
                 if historySessions.isEmpty {
                     emptyHistoryView
                 } else {
-                    ForEach(historySessions) { session in
+                    ForEach(historySessions.filter { $0.id != nil }) { session in
                         NavigationLink(destination: SessionHistoryDetailView(session: session)) {
                             HistorySessionCard(session: session)
                         }
@@ -210,8 +215,25 @@ struct SquadSessionsListView: View {
             return
         }
         
+        // ✅ Invalider le cache avant de recharger
+        SessionService.shared.invalidateCache(squadId: squadId)
+        Logger.log("🔄 Cache invalidé avant rechargement", category: .ui)
+        
         isLoading = true
         errorMessage = nil  // Reset l'erreur précédente
+        
+        // ✅ FIX: Timeout de sécurité réduit à 5 secondes
+        let timeoutTask = Task {
+            try? await Task.sleep(nanoseconds: 5_000_000_000) // 5 secondes
+            if isLoading {
+                Logger.log("⏱️ Timeout atteint lors du chargement des sessions", category: .service)
+                isLoading = false
+                // ✅ NE PAS afficher d'erreur si on a déjà des données
+                if activeSessions.isEmpty && historySessions.isEmpty {
+                    errorMessage = "Le chargement prend trop de temps. Veuillez réessayer."
+                }
+            }
+        }
         
         do {
             // Charger les sessions actives
@@ -221,9 +243,15 @@ struct SquadSessionsListView: View {
             historySessions = try await SessionService.shared.getSessionHistory(squadId: squadId)
             
             Logger.logSuccess("✅ Sessions chargées: \(activeSessions.count) actives, \(historySessions.count) historique", category: .service)
+            
+            // ✅ Annuler le timeout si le chargement réussit
+            timeoutTask.cancel()
             isLoading = false
         } catch {
             Logger.logError(error, context: "loadSessions - squadId: \(squadId)", category: .service)
+            
+            // ✅ Annuler le timeout en cas d'erreur
+            timeoutTask.cancel()
             
             // Message d'erreur plus informatif
             if activeSessions.isEmpty && historySessions.isEmpty {

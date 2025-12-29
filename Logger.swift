@@ -30,6 +30,7 @@ enum Logger {
         case network = "Network"
         case service = "Service"  // Pour les services généraux (SessionService, etc.)
         case health = "Health"  // Pour HealthKit et les métriques de santé
+        case ui = "UI"  // Pour les événements d'interface utilisateur
     }
     
     /// Log un message dans la console avec catégorisation

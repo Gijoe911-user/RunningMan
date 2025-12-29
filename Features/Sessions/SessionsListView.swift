@@ -2,7 +2,7 @@
 //  SessionsListView.swift
 //  RunningMan
 //
-//  Liste des sessions de course
+//  Vue principale pour afficher et gérer les sessions de course
 //
 
 import SwiftUI
@@ -10,114 +10,54 @@ import Combine
 import CoreLocation
 import MapKit
 
+/// Vue principale de l'onglet Sessions
+///
+/// Affiche :
+/// - Une carte avec le tracé GPS en temps réel
+/// - Le widget de stats pendant une session active
+/// - L'overlay avec infos de session et participants
+/// - Un état vide si aucune session
+///
+/// **Architecture :**
+/// - Fichier principal < 200 lignes
+/// - Sous-composants extraits (SessionActiveOverlay, etc.)
+/// - Logique déléguée aux helpers (RouteCalculator)
+///
+/// **Navigation :**
+/// - Toolbar avec bouton "+" pour créer une session
+/// - Sheet pour CreateSessionView
+///
+/// - SeeAlso: `SessionsViewModel`, `SessionActiveOverlay`, `NoSessionOverlay`
 struct SessionsListView: View {
+    
+    // MARK: - Environment
+    
     @Environment(SquadViewModel.self) private var squadsVM
+    
+    // MARK: - State
     
     @StateObject private var viewModel = SessionsViewModel()
     @State private var configuredSquadId: String? = nil
     @State private var showCreateSession = false
     
+    // MARK: - Body
+    
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
-                // Carte améliorée avec tracé et contrôles
-                EnhancedSessionMapView(
-                    userLocation: viewModel.userLocation,
-                    runnerLocations: viewModel.activeRunners,
-                    routeCoordinates: viewModel.routeCoordinates,
-                    runnerRoutes: [:], // TODO: Ajouter les tracés des autres coureurs depuis ViewModel
-                    onRecenter: {
-                        Logger.log("🎯 Recentré sur l'utilisateur", category: .location)
-                    },
-                    onSaveRoute: {
-                        saveCurrentRoute()
-                    }
-                )
-                .ignoresSafeArea(edges: .top)
-                .onAppear {
-                    // DEBUG: Vérifier les données
-                    print("🗺️ DEBUG - userLocation: \(viewModel.userLocation != nil ? "✅" : "❌")")
-                    print("🗺️ DEBUG - activeRunners: \(viewModel.activeRunners.count)")
-                    print("🗺️ DEBUG - routeCoordinates: \(viewModel.routeCoordinates.count) points")
-                    
-                    // ✅ FORCER UN LOG VISIBLE
-                    if viewModel.routeCoordinates.isEmpty {
-                        print("⚠️⚠️⚠️ ATTENTION: routeCoordinates est VIDE !")
-                    } else {
-                        print("✅✅✅ routeCoordinates contient \(viewModel.routeCoordinates.count) points")
-                        print("   Premier: \(viewModel.routeCoordinates.first!)")
-                        print("   Dernier: \(viewModel.routeCoordinates.last!)")
-                    }
-                }
-                .onChange(of: viewModel.routeCoordinates.count) { oldCount, newCount in
-                    print("🗺️ DEBUG - Route mise à jour: \(oldCount) → \(newCount) points")
-                    if newCount > 0 {
-                        print("🗺️ DEBUG - Premier point: \(viewModel.routeCoordinates.first!.latitude), \(viewModel.routeCoordinates.first!.longitude)")
-                        if newCount > 1 {
-                            print("🗺️ DEBUG - Dernier point: \(viewModel.routeCoordinates.last!.latitude), \(viewModel.routeCoordinates.last!.longitude)")
-                        }
-                    }
-                }
+                // Carte avec tracé GPS
+                mapView
                 
-                // Overlay conditionnel selon l'état de la session
+                // Overlays conditionnels
                 if let session = viewModel.activeSession {
-                    // Session active : afficher l'overlay avec infos + participants
-                    VStack(spacing: 0) {
-                        Spacer()
-                        
-                        // 🆕 Widget de stats FLOTTANT en haut (très visible !)
-                        HStack {
-                            Spacer()
-                            SessionStatsWidget(
-                                session: session,
-                                currentHeartRate: viewModel.currentHeartRate,
-                                currentCalories: viewModel.currentCalories,
-                                routeDistance: calculateRouteDistance(from: viewModel.routeCoordinates)
-                            )
-                            .frame(maxWidth: 400)
-                            Spacer()
-                        }
-                        .padding(.top, 60)  // Sous la barre de navigation
-                        .padding(.horizontal)
-                        
-                        Spacer()
-                        
-                        // Overlay des participants (en haut de l'overlay principal)
-                        if !viewModel.activeRunners.isEmpty {
-                            SessionParticipantsOverlay(
-                                participants: viewModel.activeRunners,
-                                userLocation: viewModel.userLocation,
-                                onRunnerTap: { runnerId in
-                                    Logger.log("🎯 Clic sur coureur: \(runnerId)", category: .location)
-                                    // TODO: Centrer la carte sur ce coureur
-                                    // mapView.centerOnRunner(runnerId: runnerId)
-                                }
-                            )
-                            .padding(.horizontal, 16)
-                            .padding(.bottom, 8)
-                        }
-                        
-                        // Overlay principal de la session
-                        SessionActiveOverlay(session: session, viewModel: viewModel)
-                    }
+                    activeSessionContent(session: session)
                 } else {
                     NoSessionOverlay(onCreateSession: { showCreateSession = true })
                 }
             }
             .navigationTitle("Course")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        if squadsVM.selectedSquad != nil {
-                            showCreateSession = true
-                        }
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundColor(.coralAccent)
-                            .font(.title2)
-                    }
-                    .disabled(squadsVM.selectedSquad == nil)
-                }
+                toolbarContent
             }
             .sheet(isPresented: $showCreateSession) {
                 if let squad = squadsVM.selectedSquad {
@@ -125,40 +65,118 @@ struct SessionsListView: View {
                 }
             }
             .onAppear {
-                viewModel.startLocationUpdates()
-                viewModel.centerOnUserLocation()
+                setupView()
             }
             .task(id: squadsVM.selectedSquad?.id) {
-                guard let squadId = squadsVM.selectedSquad?.id else { return }
-                if configuredSquadId != squadId {
-                    viewModel.setContext(squadId: squadId)
-                    configuredSquadId = squadId
-                }
+                configureSquadContext()
             }
+        }
+    }
+    
+    // MARK: - View Components
+    
+    /// Carte principale avec tracé GPS
+    private var mapView: some View {
+        EnhancedSessionMapView(
+            userLocation: viewModel.userLocation,
+            runnerLocations: viewModel.activeRunners,
+            routeCoordinates: viewModel.routeCoordinates,
+            runnerRoutes: [:], // TODO: Ajouter les tracés des autres coureurs
+            onRecenter: {
+                Logger.log("🎯 Recentré sur l'utilisateur", category: .location)
+            },
+            onSaveRoute: {
+                saveCurrentRoute()
+            }
+        )
+        .ignoresSafeArea(edges: .top)
+    }
+    
+    /// Contenu affiché pendant une session active
+    private func activeSessionContent(session: SessionModel) -> some View {
+        VStack(spacing: 0) {
+            Spacer()
+            
+            // Widget de stats flottant
+            statsWidget(session: session)
+            
+            Spacer()
+            
+            // Participants overlay
+            if !viewModel.activeRunners.isEmpty {
+                participantsOverlay
+            }
+            
+            // Overlay principal
+            SessionActiveOverlay(session: session, viewModel: viewModel)
+        }
+    }
+    
+    /// Widget de statistiques en direct
+    private func statsWidget(session: SessionModel) -> some View {
+        HStack {
+            Spacer()
+            SessionStatsWidget(
+                session: session,
+                currentHeartRate: viewModel.currentHeartRate,
+                currentCalories: viewModel.currentCalories,
+                routeDistance: RouteCalculator.calculateTotalDistance(from: viewModel.routeCoordinates)
+            )
+            .frame(maxWidth: 400)
+            Spacer()
+        }
+        .padding(.top, 60)
+        .padding(.horizontal)
+    }
+    
+    /// Overlay des participants actifs
+    private var participantsOverlay: some View {
+        SessionParticipantsOverlay(
+            participants: viewModel.activeRunners,
+            userLocation: viewModel.userLocation,
+            onRunnerTap: { runnerId in
+                Logger.log("🎯 Clic sur coureur: \(runnerId)", category: .location)
+                // TODO: Centrer la carte sur ce coureur
+            }
+        )
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
+    }
+    
+    /// Contenu de la toolbar
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .primaryAction) {
+            Button {
+                if squadsVM.selectedSquad != nil {
+                    showCreateSession = true
+                }
+            } label: {
+                Image(systemName: "plus.circle.fill")
+                    .foregroundColor(.coralAccent)
+                    .font(.title2)
+            }
+            .disabled(squadsVM.selectedSquad == nil)
         }
     }
     
     // MARK: - Actions
     
-    /// Calcule la distance totale d'un tracé GPS
-    private func calculateRouteDistance(from coordinates: [CLLocationCoordinate2D]) -> Double {
-        guard coordinates.count >= 2 else { return 0 }
-        
-        var totalDistance: Double = 0
-        for i in 1..<coordinates.count {
-            let loc1 = CLLocation(
-                latitude: coordinates[i-1].latitude,
-                longitude: coordinates[i-1].longitude
-            )
-            let loc2 = CLLocation(
-                latitude: coordinates[i].latitude,
-                longitude: coordinates[i].longitude
-            )
-            totalDistance += loc1.distance(from: loc2)
-        }
-        return totalDistance
+    /// Configure la vue au démarrage
+    private func setupView() {
+        viewModel.startLocationUpdates()
+        viewModel.centerOnUserLocation()
     }
     
+    /// Configure le contexte de la squad sélectionnée
+    private func configureSquadContext() {
+        guard let squadId = squadsVM.selectedSquad?.id else { return }
+        if configuredSquadId != squadId {
+            viewModel.setContext(squadId: squadId)
+            configuredSquadId = squadId
+        }
+    }
+    
+    /// Sauvegarde le tracé actuel dans Firebase
     private func saveCurrentRoute() {
         guard let session = viewModel.activeSession,
               let sessionId = session.id,
@@ -180,451 +198,9 @@ struct SessionsListView: View {
     }
 }
 
-// MARK: - Session Active Overlay
-
-struct SessionActiveOverlay: View {
-    let session: SessionModel
-    @ObservedObject var viewModel: SessionsViewModel
-    
-    @State private var showEndConfirmation = false
-    @State private var isEnding = false
-    @State private var errorMessage: String?
-    
-    var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            
-            // Panel infos session
-            sessionInfoPanel
-                .background(.ultraThinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 24))
-                .shadow(color: .black.opacity(0.2), radius: 10, y: -5)
-                .padding()
-        }
-        .alert("Terminer la session ?", isPresented: $showEndConfirmation) {
-            Button("Annuler", role: .cancel) { }
-            Button("Terminer", role: .destructive) {
-                Task {
-                    await endSession()
-                }
-            }
-        } message: {
-            Text("Cette action mettra fin à la session pour tous les participants.")
-        }
-        .alert("Erreur", isPresented: .constant(errorMessage != nil)) {
-            Button("OK") { errorMessage = nil }
-        } message: {
-            if let error = errorMessage {
-                Text(error)
-            }
-        }
-    }
-    
-    private var sessionInfoPanel: some View {
-        VStack(spacing: 16) {
-            // Handle
-            Capsule()
-                .fill(Color.gray.opacity(0.3))
-                .frame(width: 40, height: 4)
-                .padding(.top, 8)
-            
-            // Titre de la session
-            VStack(spacing: 4) {
-                Text(session.title ?? "Session Active")
-                    .font(.title3.bold())
-                    .foregroundColor(.white)
-                
-                Text(session.activityType.displayName)
-                    .font(.caption)
-                    .foregroundColor(.coralAccent)
-            }
-            
-            // Stats rapides
-            HStack(spacing: 20) {
-                StatBadge(
-                    icon: "figure.run",
-                    value: "\(viewModel.activeRunners.count)",
-                    label: "Coureurs"
-                )
-                
-                if let distance = session.targetDistanceMeters {
-                    StatBadge(
-                        icon: "location.fill",
-                        value: String(format: "%.1f km", distance / 1000),
-                        label: "Objectif"
-                    )
-                }
-                
-                StatBadge(
-                    icon: "clock.fill",
-                    value: timeElapsed,
-                    label: "Temps"
-                )
-            }
-            .padding(.vertical, 8)
-            
-            // Liste compacte des runners
-            if !viewModel.activeRunners.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Coureurs actifs")
-                        .font(.caption.bold())
-                        .foregroundColor(.white.opacity(0.7))
-                    
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 12) {
-                            ForEach(viewModel.activeRunners.prefix(5)) { runner in
-                                RunnerCompactCard(runner: runner)
-                            }
-                            
-                            if viewModel.activeRunners.count > 5 {
-                                Text("+\(viewModel.activeRunners.count - 5)")
-                                    .font(.caption.bold())
-                                    .foregroundColor(.white.opacity(0.7))
-                                    .frame(width: 50, height: 50)
-                                    .background(Color.white.opacity(0.1))
-                                    .clipShape(Circle())
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Bouton terminer
-            Button {
-                if !isEnding {
-                    showEndConfirmation = true
-                }
-            } label: {
-                HStack {
-                    if isEnding {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .tint(.white)
-                        Text("Terminaison en cours...")
-                    } else {
-                        Image(systemName: "stop.circle.fill")
-                        Text("Terminer la session")
-                    }
-                }
-                .font(.headline)
-                .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(isEnding ? Color.red.opacity(0.6) : Color.red)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .disabled(isEnding)
-            .animation(.easeInOut, value: isEnding)
-        }
-        .padding()
-    }
-    
-    // MARK: - Actions
-    
-    private func endSession() async {
-        Logger.log("🔴 endSession() appelé - isEnding: \(isEnding)", category: .session)
-        
-        guard !isEnding else {
-            Logger.log("⚠️ Déjà en cours de terminaison, ignoré", category: .session)
-            return
-        }
-        
-        isEnding = true
-        errorMessage = nil // Reset les erreurs précédentes
-        
-        Logger.log("🔄 Début de la terminaison...", category: .session)
-        
-        do {
-            try await viewModel.endSession()
-            // SUCCESS: La vue se mettra à jour automatiquement quand activeSession sera nil
-            Logger.log("✅ endSession() réussi, isEnding = false", category: .session)
-            isEnding = false
-        } catch {
-            // ERROR: Afficher l'erreur et permettre de réessayer
-            Logger.log("❌ endSession() échoué: \(error.localizedDescription)", category: .session)
-            errorMessage = error.localizedDescription
-            isEnding = false
-        }
-    }
-    
-    private var timeElapsed: String {
-        let elapsed = Date().timeIntervalSince(session.startedAt)
-        let minutes = Int(elapsed) / 60
-        let seconds = Int(elapsed) % 60
-        return String(format: "%02d:%02d", minutes, seconds)
-    }
-}
-
-struct SessionsEmptyView: View {
-    @Environment(SquadViewModel.self) private var squadVM
-    @State private var showCreateSession = false
-    
-    var body: some View {
-        ZStack {
-            Color.darkNavy
-                .ignoresSafeArea()
-            
-            VStack(spacing: 30) {
-                // Icon
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.coralAccent.opacity(0.3), Color.coralAccent.opacity(0.1)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 120, height: 120)
-                    
-                    Image(systemName: "figure.run.circle.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.coralAccent)
-                        .symbolEffect(.pulse)
-                }
-                
-                VStack(spacing: 12) {
-                    Text("Aucune session active")
-                        .font(.title2.bold())
-                        .foregroundColor(.white)
-                    
-                    Text("Créez une session pour commencer à courir avec votre squad")
-                        .font(.body)
-                        .foregroundColor(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                }
-                
-                if let squad = squadVM.selectedSquad {
-                    Button {
-                        showCreateSession = true
-                    } label: {
-                        HStack {
-                            Image(systemName: "play.circle.fill")
-                            Text("Démarrer une session")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 32)
-                        .padding(.vertical, 16)
-                        .background(
-                            LinearGradient(
-                                colors: [Color.coralAccent, Color.pinkAccent],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                    }
-                    .sheet(isPresented: $showCreateSession) {
-                        CreateSessionView(squad: squad)
-                    }
-                    
-                    // 🧪 DEBUG: Bouton pour voir la carte (TEMPORAIRE)
-                    #if DEBUG
-                    Text("Debug: Voir la carte de test")
-                        .font(.caption.bold())
-                        .foregroundColor(.yellowAccent)
-                        .padding(.top, 20)
-                    
-                    Text("Pour tester: Démarrez une vraie session ci-dessus ↑")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.5))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 40)
-                    #endif
-                } else {
-                    VStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.yellowAccent)
-                        Text("Sélectionnez un squad d'abord")
-                            .font(.caption)
-                            .foregroundColor(.white.opacity(0.6))
-                    }
-                }
-            }
-        }
-    }
-}
-
-struct RunnerRowView: View {
-    let runner: RunnerLocation
-    
-    var body: some View {
-        HStack {
-            if let photoURL = runner.photoURL, let url = URL(string: photoURL) {
-                AsyncImage(url: url) { image in
-                    image.resizable()
-                } placeholder: {
-                    Image(systemName: "person.circle.fill")
-                }
-                .frame(width: 40, height: 40)
-                .clipShape(Circle())
-            } else {
-                Image(systemName: "person.circle.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.secondary)
-            }
-            
-            VStack(alignment: .leading) {
-                Text(runner.displayName)
-                    .font(.headline)
-                Text(runner.timestamp.formatted(date: .omitted, time: .shortened))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
-// MARK: - Supporting Views
-
-struct StatBadge: View {
-    let icon: String
-    let value: String
-    let label: String
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            Image(systemName: icon)
-                .font(.title3)
-                .foregroundColor(.coralAccent)
-            
-            Text(value)
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-struct RunnerCompactCard: View {
-    let runner: RunnerLocation
-    
-    var body: some View {
-        VStack(spacing: 4) {
-            // Avatar
-            if let photoURL = runner.photoURL, let url = URL(string: photoURL) {
-                AsyncImage(url: url) { image in
-                    image
-                        .resizable()
-                        .scaledToFill()
-                } placeholder: {
-                    Circle()
-                        .fill(Color.coralAccent.opacity(0.3))
-                        .overlay {
-                            Image(systemName: "person.fill")
-                                .foregroundColor(.coralAccent)
-                        }
-                }
-                .frame(width: 50, height: 50)
-                .clipShape(Circle())
-            } else {
-                Circle()
-                    .fill(Color.coralAccent.opacity(0.3))
-                    .frame(width: 50, height: 50)
-                    .overlay {
-                        Image(systemName: "person.fill")
-                            .foregroundColor(.coralAccent)
-                    }
-            }
-            
-            // Nom
-            Text(runner.displayName)
-                .font(.caption2)
-                .foregroundColor(.white)
-                .lineLimit(1)
-        }
-        .frame(width: 60)
-    }
-}
-
-// MARK: - SessionMapView
-// Note: SessionMapView a été remplacé par EnhancedSessionMapView
-// Voir EnhancedSessionMapView.swift pour la version complète avec tracés et contrôles
-
-// MARK: - Runner Map Marker
-// Note: RunnerMapMarker est maintenant défini dans EnhancedSessionMapView.swift
-// Cette version locale a été retirée pour éviter les redéclarations
-
-// MARK: - No Session Overlay
-
-struct NoSessionOverlay: View {
-    let onCreateSession: () -> Void
-    
-    var body: some View {
-        VStack {
-            Spacer()
-            
-            VStack(spacing: 20) {
-                // Icône
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [Color.coralAccent.opacity(0.3), Color.pinkAccent.opacity(0.3)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 80, height: 80)
-                    
-                    Image(systemName: "figure.run.circle")
-                        .font(.system(size: 40))
-                        .foregroundColor(.coralAccent)
-                }
-                
-                VStack(spacing: 8) {
-                    Text("Aucune session active")
-                        .font(.title3.bold())
-                        .foregroundColor(.white)
-                    
-                    Text("Créez une session pour commencer à courir avec votre squad")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal)
-                }
-                
-                Button(action: onCreateSession) {
-                    HStack {
-                        Image(systemName: "plus.circle.fill")
-                        Text("Créer une session")
-                    }
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 12)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.coralAccent, Color.pinkAccent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .clipShape(Capsule())
-                    .shadow(color: .coralAccent.opacity(0.5), radius: 10, y: 5)
-                }
-            }
-            .padding(32)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 24))
-            .shadow(color: .black.opacity(0.3), radius: 20, y: 10)
-            .padding()
-            
-            Spacer()
-        }
-    }
-}
-
-
+// MARK: - Preview
 
 #Preview {
-    // Pour l’aperçu, on peut injecter un SquadViewModel mock si nécessaire
     SessionsListView()
         .environment(SquadViewModel())
 }
