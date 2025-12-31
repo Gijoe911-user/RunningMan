@@ -183,6 +183,53 @@ class SessionService {
         }
     }
     
+    /// Met à jour des champs spécifiques d'une session
+    func updateSessionFields(sessionId: String, fields: [String: Any]) async throws {
+        var updateData = fields
+        updateData["updatedAt"] = FieldValue.serverTimestamp()
+        
+        try await db.collection("sessions")
+            .document(sessionId)
+            .updateData(updateData)
+        
+        Logger.logSuccess("✅ Session \(sessionId) mise à jour", category: .service)
+    }
+    
+    /// Récupère la session de course active pour une squad (s'il y en a une)
+    func getActiveRaceSession(squadId: String) async throws -> SessionModel? {
+        let snapshot = try await db.collection("sessions")
+            .whereField("squadId", isEqualTo: squadId)
+            .whereField("activityType", isEqualTo: ActivityType.race.rawValue)
+            .whereField("status", isEqualTo: SessionStatus.active.rawValue)
+            .limit(to: 1)
+            .getDocuments()
+        
+        guard let document = snapshot.documents.first else {
+            Logger.log("✅ Aucune course active pour squad: \(squadId)", category: .service)
+            return nil
+        }
+        
+        let session = try document.data(as: SessionModel.self)
+        Logger.log("🏁 Course active détectée: \(session.id ?? "unknown")", category: .service)
+        return session
+    }
+    
+    /// Vérifie si un utilisateur a déjà une session active dans une squad donnée
+    func getUserActiveSession(squadId: String, userId: String) async throws -> SessionModel? {
+        let snapshot = try await db.collection("sessions")
+            .whereField("squadId", isEqualTo: squadId)
+            .whereField("creatorId", isEqualTo: userId)
+            .whereField("status", isEqualTo: SessionStatus.active.rawValue)
+            .limit(to: 1)
+            .getDocuments()
+        
+        guard let document = snapshot.documents.first else {
+            return nil
+        }
+        
+        return try document.data(as: SessionModel.self)
+    }
+    
     // MARK: - Get Session
     
     /// Récupère une session par son ID

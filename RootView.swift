@@ -15,8 +15,8 @@ struct RootView: View {
     
     var body: some View {
         Group {
-            if authVM.isLoading {
-                // Écran de chargement initial
+            if authVM.isLoading || (authVM.isAuthenticated && squadVM.userSquads.isEmpty && !squadVM.hasAttemptedLoad) {
+                // Écran de chargement initial OU chargement des squads
                 loadingView
                     .transition(.opacity)
             } else if authVM.isAuthenticated {

@@ -34,6 +34,13 @@ struct SessionModel: Identifiable, Codable, Hashable {
     var notes: String?
     var activityType: ActivityType
     
+    // 🆕 Programme d'entraînement associé
+    var trainingProgramId: String?
+    
+    // 🆕 Localisation de la session (pour identifier où se retrouver)
+    var meetingLocationName: String?        // Ex: "Parc de la Tête d'Or, Lyon"
+    var meetingLocationCoordinate: GeoPoint?  // Coordonnées du lieu de RDV
+    
     // 🆕 NOUVEAUX CHAMPS - Refonte Incrément 3
     var runType: RunType?
     var visibility: SessionVisibility?
@@ -62,6 +69,9 @@ struct SessionModel: Identifiable, Codable, Hashable {
         title: String? = nil,
         notes: String? = nil,
         activityType: ActivityType = .training,
+        trainingProgramId: String? = nil,
+        meetingLocationName: String? = nil,
+        meetingLocationCoordinate: GeoPoint? = nil,
         runType: RunType? = .solo,
         visibility: SessionVisibility? = .squad,
         isJoinable: Bool? = true,
@@ -85,6 +95,9 @@ struct SessionModel: Identifiable, Codable, Hashable {
         self.title = title
         self.notes = notes
         self.activityType = activityType
+        self.trainingProgramId = trainingProgramId
+        self.meetingLocationName = meetingLocationName
+        self.meetingLocationCoordinate = meetingLocationCoordinate
         self.runType = runType
         self.visibility = visibility
         self.isJoinable = isJoinable

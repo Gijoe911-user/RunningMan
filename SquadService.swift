@@ -79,7 +79,18 @@ class SquadService {
         // 1. Rechercher la squad par code d'invitation
         let squadsRef = db.collection("squads")
         let query = squadsRef.whereField("inviteCode", isEqualTo: inviteCode.uppercased())
-        let snapshot = try await query.getDocuments()
+        
+        let snapshot: QuerySnapshot
+        do {
+            snapshot = try await query.getDocuments()
+        } catch {
+            // Gérer spécifiquement les erreurs de quota
+            if (error as NSError).code == 8 { // RESOURCE_EXHAUSTED
+                Logger.logError(error, context: "joinSquad - Quota Firebase épuisé", category: .squads)
+                throw SquadError.quotaExceeded
+            }
+            throw error
+        }
         
         guard let document = snapshot.documents.first else {
             throw SquadError.invalidInviteCode
@@ -96,10 +107,24 @@ class SquadService {
         squad.members[userId] = .member
         
         // 4. Mettre à jour Firestore
-        try document.reference.setData(from: squad, merge: true)
+        do {
+            try document.reference.setData(from: squad, merge: true)
+        } catch {
+            if (error as NSError).code == 8 {
+                throw SquadError.quotaExceeded
+            }
+            throw error
+        }
         
         // 5. Ajouter la squad à la liste des squads de l'utilisateur
-        try await addSquadToUser(userId: userId, squadId: document.documentID)
+        do {
+            try await addSquadToUser(userId: userId, squadId: document.documentID)
+        } catch {
+            if (error as NSError).code == 8 {
+                throw SquadError.quotaExceeded
+            }
+            throw error
+        }
         
         Logger.logSuccess("Squad rejointe avec succès: \(document.documentID)", category: .squads)
         
@@ -213,7 +238,7 @@ class SquadService {
     private func addSquadToUser(userId: String, squadId: String) async throws {
         let userRef = db.collection("users").document(userId)
         try await userRef.updateData([
-            "squadIds": FieldValue.arrayUnion([squadId])
+            "squads": FieldValue.arrayUnion([squadId])
         ])
     }
     
@@ -221,7 +246,7 @@ class SquadService {
     private func removeSquadFromUser(userId: String, squadId: String) async throws {
         let userRef = db.collection("users").document(userId)
         try await userRef.updateData([
-            "squadIds": FieldValue.arrayRemove([squadId])
+            "squads": FieldValue.arrayRemove([squadId])
         ])
     }
     
@@ -434,6 +459,7 @@ enum SquadError: LocalizedError {
     case codeGenerationFailed
     case insufficientPermissions
     case cannotChangeCreatorRole
+    case quotaExceeded
     
     var errorDescription: String? {
         switch self {
@@ -455,6 +481,8 @@ enum SquadError: LocalizedError {
             return "Vous n'avez pas les permissions nécessaires"
         case .cannotChangeCreatorRole:
             return "Le rôle du créateur ne peut pas être modifié"
+        case .quotaExceeded:
+            return "Quota Firebase dépassé. Veuillez réessayer dans quelques minutes ou contacter le support."
         }
     }
 }

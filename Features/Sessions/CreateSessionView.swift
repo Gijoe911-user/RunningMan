@@ -17,6 +17,8 @@ struct CreateSessionView: View {
     @State private var activityType: ActivityType = .training
     @State private var targetDistance: String = ""
     @State private var targetDuration: String = ""
+    @State private var useQuickDistance = true  // ✅ Toggle pour distance rapide
+    @State private var quickDistance: Double = 5.0  // ✅ Distance pré-définie
     @State private var isCreating = false
     @State private var errorMessage: String?
     
@@ -136,24 +138,62 @@ struct CreateSessionView: View {
                 .foregroundColor(.white)
             
             VStack(spacing: 12) {
-                // Distance
+                // Distance - Mode Rapide
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Distance cible", systemImage: "location.fill")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.9))
-                    
                     HStack {
-                        TextField("Ex: 10", text: $targetDistance)
-                            .keyboardType(.decimalPad)
-                            .padding()
-                            .background(.ultraThinMaterial)
-                            .clipShape(RoundedRectangle(cornerRadius: 10))
-                            .foregroundColor(.white)
-                        
-                        Text("km")
+                        Label("Distance cible", systemImage: "location.fill")
                             .font(.subheadline)
-                            .foregroundColor(.white.opacity(0.7))
-                            .frame(width: 40)
+                            .foregroundColor(.white.opacity(0.9))
+                        
+                        Spacer()
+                        
+                        Button {
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                useQuickDistance.toggle()
+                                // Vider le champ personnalisé lors du retour au mode rapide
+                                if useQuickDistance {
+                                    targetDistance = ""
+                                }
+                            }
+                        } label: {
+                            Text(useQuickDistance ? "Personnalisé" : "Rapide")
+                                .font(.caption)
+                                .foregroundColor(.coralAccent)
+                        }
+                    }
+                    
+                    if useQuickDistance {
+                        // ✅ Picker pour sélection rapide
+                        Picker("Distance", selection: $quickDistance) {
+                            Text("1 km").tag(1.0)
+                            Text("3 km").tag(3.0)
+                            Text("5 km").tag(5.0)
+                            Text("10 km").tag(10.0)
+                            Text("15 km").tag(15.0)
+                            Text("21 km").tag(21.1)
+                            Text("42 km").tag(42.2)
+                        }
+                        .pickerStyle(.wheel)
+                        .frame(height: 100)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    } else {
+                        // ✅ TextField avec binding filtré pour saisie personnalisée
+                        HStack {
+                            TextField("Ex: 10", text: filteredDistanceBinding)
+                                .keyboardType(.decimalPad)
+                                .autocorrectionDisabled()
+                                .textInputAutocapitalization(.never)
+                                .padding()
+                                .background(.ultraThinMaterial)
+                                .clipShape(RoundedRectangle(cornerRadius: 10))
+                                .foregroundColor(.white)
+                            
+                            Text("km")
+                                .font(.subheadline)
+                                .foregroundColor(.white.opacity(0.7))
+                                .frame(width: 40)
+                        }
                     }
                 }
                 
@@ -164,8 +204,9 @@ struct CreateSessionView: View {
                         .foregroundColor(.white.opacity(0.9))
                     
                     HStack {
-                        TextField("Ex: 60", text: $targetDuration)
+                        TextField("Ex: 60", text: filteredDurationBinding)
                             .keyboardType(.numberPad)
+                            .autocorrectionDisabled()
                             .padding()
                             .background(.ultraThinMaterial)
                             .clipShape(RoundedRectangle(cornerRadius: 10))
@@ -182,6 +223,77 @@ struct CreateSessionView: View {
             .background(Color.white.opacity(0.05))
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+    }
+    
+    // MARK: - Filtered Bindings
+    
+    /// Binding filtré pour la distance (uniquement chiffres et un point/virgule)
+    private var filteredDistanceBinding: Binding<String> {
+        Binding(
+            get: { targetDistance },
+            set: { newValue in
+                // Filtrer immédiatement au niveau du binding
+                var filtered = newValue.filter { "0123456789.,".contains($0) }
+                
+                // Remplacer les virgules par des points
+                filtered = filtered.replacingOccurrences(of: ",", with: ".")
+                
+                // Ne garder qu'un seul point
+                if filtered.filter({ $0 == "." }).count > 1 {
+                    if let firstDotIndex = filtered.firstIndex(of: ".") {
+                        var result = ""
+                        var dotSeen = false
+                        for char in filtered {
+                            if char == "." {
+                                if !dotSeen {
+                                    result.append(char)
+                                    dotSeen = true
+                                }
+                            } else {
+                                result.append(char)
+                            }
+                        }
+                        filtered = result
+                    }
+                }
+                
+                // Limiter à 2 décimales
+                if let dotIndex = filtered.firstIndex(of: ".") {
+                    let afterDot = filtered[filtered.index(after: dotIndex)...]
+                    if afterDot.count > 2 {
+                        let beforeDot = filtered[..<filtered.index(after: dotIndex)]
+                        let twoDecimals = afterDot.prefix(2)
+                        filtered = String(beforeDot) + String(twoDecimals)
+                    }
+                }
+                
+                // Limiter à 3 chiffres avant le point (999.99 km max)
+                if let dotIndex = filtered.firstIndex(of: ".") {
+                    let beforeDot = filtered[..<dotIndex]
+                    if beforeDot.count > 3 {
+                        let limited = beforeDot.prefix(3)
+                        filtered = String(limited) + String(filtered[dotIndex...])
+                    }
+                } else if filtered.count > 3 {
+                    filtered = String(filtered.prefix(3))
+                }
+                
+                targetDistance = filtered
+            }
+        )
+    }
+    
+    /// Binding filtré pour la durée (uniquement chiffres)
+    private var filteredDurationBinding: Binding<String> {
+        Binding(
+            get: { targetDuration },
+            set: { newValue in
+                // Filtrer immédiatement - uniquement les chiffres
+                let filtered = newValue.filter { $0.isNumber }
+                // Limiter à 4 chiffres (9999 minutes max = 166 heures)
+                targetDuration = String(filtered.prefix(4))
+            }
+        )
     }
     
     // MARK: - Create Button

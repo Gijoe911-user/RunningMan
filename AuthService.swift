@@ -77,8 +77,8 @@ class AuthService {
             displayName: cleanDisplayName,
             email: cleanEmail,
             createdAt: Date(),
-            squadIds: [],
-            preferences: UserPreferences()
+            lastSeen: Date(),
+            squads: []
         )
         
         try await createUserProfile(newUser)
@@ -130,8 +130,8 @@ class AuthService {
                     displayName: authResult.user.displayName ?? cleanEmail.components(separatedBy: "@").first ?? "Utilisateur",
                     email: cleanEmail,
                     createdAt: Date(),
-                    squadIds: [],
-                    preferences: UserPreferences()
+                    lastSeen: Date(),
+                    squads: []
                 )
                 
                 try await createUserProfile(newUser)

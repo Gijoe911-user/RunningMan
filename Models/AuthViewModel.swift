@@ -46,6 +46,28 @@ class AuthViewModel {
         Task { @MainActor in
             await checkAuthState()
         }
+        
+        // 🔥 CORRECTION : Écouter les mises à jour des squads
+        setupSquadsUpdateListener()
+    }
+    
+    // MARK: - Squads Update Listener
+    
+    /// Configure un listener pour rafraîchir l'utilisateur quand ses squads changent
+    private func setupSquadsUpdateListener() {
+        NotificationCenter.default.addObserver(
+            forName: NSNotification.Name("UserSquadsUpdated"),
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self = self else { return }
+            
+            Logger.log("📬 Notification reçue : UserSquadsUpdated", category: .auth)
+            
+            Task { @MainActor in
+                await self.refreshUser()
+            }
+        }
     }
     
     // MARK: - Check Auth State

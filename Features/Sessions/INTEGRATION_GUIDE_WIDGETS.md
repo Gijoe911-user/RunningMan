@@ -407,12 +407,25 @@ Features → Location → Freeway Drive (pour simuler mouvement)
 
 ---
 
+## ⚠️ Problèmes de Visibilité des Sessions
+
+**Symptôme :** Les sessions créées ne sont pas visibles par les autres membres ?
+
+**👉 Voir le guide complet :** [`SESSION_VISIBILITY_FIX.md`](./SESSION_VISIBILITY_FIX.md)
+
+**Corrections appliquées :**
+- ✅ Autorisation de création pour tous les membres (configurable)
+- ⚠️ Vérification de la synchronisation Firebase en cours
+
+---
+
 **Question ?** Voulez-vous que je :
 1. ✅ Intègre les badges dans l'overlay principal ?
 2. ✅ Configure HealthKit pour voir les vraies données ?
 3. ✅ Crée une vue de résumé post-session ?
+4. ✅ Aide à déboguer les problèmes de synchronisation Firebase ?
 
 ---
 
-**Date :** 29 décembre 2024  
+**Date :** 30 décembre 2024  
 **Auteur :** Assistant Architecture RunningMan

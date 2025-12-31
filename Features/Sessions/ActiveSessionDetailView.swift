@@ -8,6 +8,7 @@
 import SwiftUI
 import MapKit
 import Combine
+import HealthKit
 
 struct ActiveSessionDetailView: View {
     let session: SessionModel
@@ -70,14 +71,19 @@ struct ActiveSessionDetailView: View {
                 Logger.log("❌ Session ID manquant, impossible de démarrer l'observation", category: .session)
                 return
             }
+            
+            // 1. Démarrer l'observation de la session
             await viewModel.startObserving(sessionId: sessionId)
+            
+            // 2. ✅ DÉMARRER HealthKit monitoring
+            await viewModel.startHealthKitTracking()
         }
         .onDisappear {
+            // 1. Arrêter l'observation de la session
             viewModel.stopObserving()
             
-            // ✅ FIX: Arrêter HealthKit monitoring quand on quitte la vue
-            HealthKitManager.shared.stopHeartRateQuery()
-            Logger.log("🛑 ActiveSessionDetailView: HealthKit arrêté", category: .general)
+            // 2. ✅ Arrêter HealthKit monitoring
+            viewModel.stopHealthKitTracking()
         }
     }
     
@@ -174,21 +180,60 @@ struct ActiveSessionDetailView: View {
                 }
             }
             
-            // Progression
+            // ✅ Progression avec overlay animé
             if let targetDistance = session.targetDistanceMeters {
-                ProgressView(value: session.totalDistanceMeters, total: targetDistance)
-                    .tint(.coralAccent)
-                
+                VStack(spacing: 8) {
+                    // Barre de progression avec overlay
+                    ZStack(alignment: .leading) {
+                        // Fond
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color.white.opacity(0.1))
+                            .frame(height: 12)
+                        
+                        // Progression avec gradient animé
+                        GeometryReader { geometry in
+                            let progress = min(session.totalDistanceMeters / targetDistance, 1.0)
+                            let width = geometry.size.width * progress
+                            
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [Color.coralAccent, Color.pinkAccent],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .frame(width: width)
+                                .animation(.easeInOut(duration: 0.5), value: progress)
+                        }
+                        .frame(height: 12)
+                    }
+                    
+                    // Labels
+                    HStack {
+                        Text("\(String(format: "%.2f", session.distanceInKilometers)) km")
+                            .font(.subheadline.bold())
+                            .foregroundColor(.white)
+                        
+                        Spacer()
+                        
+                        let percentage = min(100, Int((session.totalDistanceMeters / targetDistance) * 100))
+                        Text("\(percentage)% • Objectif: \(String(format: "%.2f", targetDistance / 1000)) km")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                }
+            } else {
+                // Pas d'objectif défini, afficher juste la distance
                 HStack {
+                    Image(systemName: "location.fill")
+                        .foregroundColor(.coralAccent)
+                    
                     Text("\(String(format: "%.2f", session.distanceInKilometers)) km")
-                        .font(.caption)
+                        .font(.title2.bold())
                         .foregroundColor(.white)
                     
                     Spacer()
-                    
-                    Text("Objectif: \(String(format: "%.2f", targetDistance / 1000)) km")
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
                 }
             }
         }
@@ -218,16 +263,16 @@ struct ActiveSessionDetailView: View {
             
             LiveStatCard(
                 icon: "flame.fill",
-                title: "Vitesse moy.",
-                value: String(format: "%.1f km/h", session.averageSpeedKmh),
+                title: "Calories",
+                value: String(format: "%.0f kcal", viewModel.calories),
                 color: .orange
             )
             
             LiveStatCard(
-                icon: "figure.run",
-                title: "Coureurs",
-                value: "\(session.participants.count)",
-                color: .green
+                icon: "heart.fill",
+                title: "FC",
+                value: viewModel.heartRate > 0 ? "\(Int(viewModel.heartRate)) bpm" : "--",
+                color: .red
             )
         }
     }
@@ -403,12 +448,17 @@ class ActiveSessionViewModel: ObservableObject {
     @Published var centerOnUserTrigger: Bool = false
     @Published var currentSession: SessionModel?
     
+    // ✅ HealthKit stats en temps réel
+    @Published var heartRate: Double = 0
+    @Published var calories: Double = 0
+    
     private let realtimeService = RealtimeLocationService.shared
     private let routeService = RouteTrackingService.shared
     private let sessionService = SessionService.shared
     private var cancellables = Set<AnyCancellable>()
     private var sessionId: String?
     private var sessionObservationTask: Task<Void, Never>?
+    private var caloriesObservationTask: Task<Void, Never>?  // ✅ Task pour observer les calories
     
     func startObserving(sessionId: String) async {
         self.sessionId = sessionId
@@ -508,6 +558,7 @@ class ActiveSessionViewModel: ObservableObject {
     func stopObserving() {
         cancellables.removeAll()
         sessionObservationTask?.cancel()
+        caloriesObservationTask?.cancel()  // ✅ Annuler l'observation des calories
         
         // Sauvegarder le tracé si disponible
         if let sessionId = sessionId,
@@ -524,6 +575,77 @@ class ActiveSessionViewModel: ObservableObject {
         }
         
         Logger.log("🛑 Observation arrêtée", category: .location)
+    }
+    
+    // MARK: - HealthKit Tracking
+    
+    /// Démarre le tracking HealthKit (fréquence cardiaque, calories, workout)
+    func startHealthKitTracking() async {
+        Logger.log("🏃 Démarrage du tracking HealthKit", category: .health)
+        
+        // Vérifier la disponibilité
+        guard HealthKitManager.shared.isAvailable else {
+            Logger.log("⚠️ HealthKit non disponible", category: .health)
+            return
+        }
+        
+        // Demander les autorisations
+        let authorized = await HealthKitManager.shared.requestAuthorization()
+        guard authorized else {
+            Logger.log("⚠️ Autorisations HealthKit refusées", category: .health)
+            return
+        }
+        
+        // 1. Démarrer l'observation de la fréquence cardiaque
+        HealthKitManager.shared.startObservingHeartRate { [weak self] rate in
+            Task { @MainActor in
+                self?.heartRate = rate
+                Logger.log("💓 FC: \(Int(rate)) bpm", category: .health)
+            }
+        }
+        
+        // 2. Démarrer le workout (course à pied)
+        do {
+            try await HealthKitManager.shared.startWorkout(activityType: .running)
+            Logger.logSuccess("✅ Workout HealthKit démarré", category: .health)
+        } catch {
+            Logger.logError(error, context: "startWorkout", category: .health)
+        }
+        
+        // 3. Observer les calories brûlées toutes les 10 secondes
+        caloriesObservationTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)  // 10 secondes
+                
+                if let activeCalories = await HealthKitManager.shared.getActiveEnergyBurned() {
+                    await MainActor.run {
+                        self?.calories = activeCalories
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Arrête le tracking HealthKit et sauvegarde le workout
+    func stopHealthKitTracking() {
+        Logger.log("🛑 Arrêt du tracking HealthKit", category: .health)
+        
+        // 1. Annuler l'observation des calories
+        caloriesObservationTask?.cancel()
+        caloriesObservationTask = nil
+        
+        // 2. Arrêter l'observation de la fréquence cardiaque
+        HealthKitManager.shared.stopHeartRateQuery()
+        
+        // 3. Terminer et sauvegarder le workout
+        Task {
+            do {
+                try await HealthKitManager.shared.endWorkout()
+                Logger.logSuccess("✅ Workout sauvegardé dans HealthKit", category: .health)
+            } catch {
+                Logger.logError(error, context: "endWorkout", category: .health)
+            }
+        }
     }
     
     func centerOnUser() {

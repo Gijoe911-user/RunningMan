@@ -226,58 +226,6 @@ struct ProfileView: View {
     }
 }
 
-// MARK: - Stat Card (Profil)
-
-struct StatCard: View {
-    let icon: String
-    let value: String
-    var unit: String = ""
-    let label: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.title2)
-                .foregroundColor(color)
-            
-            HStack(alignment: .firstTextBaseline, spacing: 2) {
-                Text(value)
-                    .font(.system(size: 24, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                
-                if !unit.isEmpty {
-                    Text(unit)
-                        .font(.caption)
-                        .foregroundColor(.white.opacity(0.7))
-                }
-            }
-            
-            Text(label)
-                .font(.caption)
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 16)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-    }
-}
-
-// MARK: - Settings Placeholder (si absent)
-
-//struct SettingsView: View {
-//    var body: some View {
-//        NavigationStack {
-//            Text("Settings")
-//                .foregroundColor(.white)
-//                .frame(maxWidth: .infinity, maxHeight: .infinity)
-//                .background(Color.darkNavy.ignoresSafeArea())
-//                .navigationTitle("Paramètres")
-//        }
-//    }
-//}
-
 // MARK: - Preview
 
 #Preview {

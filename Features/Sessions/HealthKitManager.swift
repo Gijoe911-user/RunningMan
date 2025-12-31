@@ -47,6 +47,10 @@ class HealthKitManager: ObservableObject {
     // MARK: - Availability
     
     /// Vérifie si HealthKit est disponible sur cet appareil
+    var isAvailable: Bool {
+        HKHealthStore.isHealthDataAvailable()
+    }
+    
     func checkAvailability() {
         guard HKHealthStore.isHealthDataAvailable() else {
             Logger.log("⚠️ HealthKit n'est pas disponible sur cet appareil", category: .general)
@@ -57,8 +61,19 @@ class HealthKitManager: ObservableObject {
     
     // MARK: - Authorization
     
-    /// Demande les permissions HealthKit
-    func requestAuthorization() async throws {
+    /// Demande les permissions HealthKit - Version simplifiée qui retourne Bool
+    func requestAuthorization() async -> Bool {
+        do {
+            try await requestAuthorizationDetailed()
+            return true
+        } catch {
+            Logger.logError(error, context: "requestAuthorization", category: .general)
+            return false
+        }
+    }
+    
+    /// Demande les permissions HealthKit - Version détaillée
+    func requestAuthorizationDetailed() async throws {
         Logger.log("🔐 Demande des permissions HealthKit...", category: .general)
         
         // Types de données à lire
@@ -89,6 +104,87 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - Heart Rate Monitoring
+    
+    /// Démarre l'observation de la fréquence cardiaque avec callback
+    func startObservingHeartRate(onUpdate: @escaping (Double) -> Void) {
+        Logger.log("❤️ Démarrage de l'observation de la fréquence cardiaque (callback)", category: .general)
+        
+        guard isAuthorized else {
+            Logger.log("⚠️ HealthKit non autorisé", category: .general)
+            return
+        }
+        
+        sessionStartTime = Date()
+        heartRateSamples.removeAll()
+        
+        // Type de données : fréquence cardiaque
+        guard let heartRateType = HKObjectType.quantityType(forIdentifier: .heartRate) else {
+            Logger.log("❌ Impossible de récupérer le type de fréquence cardiaque", category: .general)
+            return
+        }
+        
+        // Créer une query d'ancrage pour observer les nouvelles données en temps réel
+        let query = HKAnchoredObjectQuery(
+            type: heartRateType,
+            predicate: nil,
+            anchor: nil,
+            limit: HKObjectQueryNoLimit
+        ) { [weak self] query, samples, deletedObjects, anchor, error in
+            
+            guard let self = self else { return }
+            
+            if let error = error {
+                Task { @MainActor in
+                    Logger.logError(error, context: "heartRateQuery", category: .general)
+                }
+                return
+            }
+            
+            Task { @MainActor in
+                await self.processHeartRateSamplesWithCallback(samples, callback: onUpdate)
+            }
+        }
+        
+        // Handler pour les mises à jour continues
+        query.updateHandler = { [weak self] query, samples, deletedObjects, anchor, error in
+            guard let self = self else { return }
+            
+            if let error = error {
+                Task { @MainActor in
+                    Logger.logError(error, context: "heartRateQuery.updateHandler", category: .general)
+                }
+                return
+            }
+            
+            Task { @MainActor in
+                await self.processHeartRateSamplesWithCallback(samples, callback: onUpdate)
+            }
+        }
+        
+        heartRateQuery = query
+        healthStore.execute(query)
+        
+        Logger.logSuccess("✅ Observation de la fréquence cardiaque démarrée (callback)", category: .general)
+    }
+    
+    /// Traite les échantillons avec callback
+    private func processHeartRateSamplesWithCallback(_ samples: [HKSample]?, callback: @escaping (Double) -> Void) async {
+        guard let samples = samples as? [HKQuantitySample] else { return }
+        
+        let recentSamples = Array(samples.suffix(5))
+        
+        for sample in recentSamples {
+            let heartRateUnit = HKUnit.count().unitDivided(by: .minute())
+            let heartRate = sample.quantity.doubleValue(for: heartRateUnit)
+            
+            // Mettre à jour le BPM actuel
+            self.currentHeartRate = heartRate
+            heartRateSamples.append(heartRate)
+            
+            // Appeler le callback
+            callback(heartRate)
+        }
+    }
     
     /// Démarre l'observation de la fréquence cardiaque pour une session
     func startHeartRateQuery(sessionId: String) {
@@ -354,6 +450,63 @@ class HealthKitManager: ObservableObject {
     }
     
     // MARK: - Workout Session (Bonus)
+    
+    /// Démarre un workout HealthKit (simplifié pour ActiveSessionDetailView)
+    func startWorkout(activityType: HKWorkoutActivityType = .running) async throws {
+        let configuration = HKWorkoutConfiguration()
+        configuration.activityType = activityType
+        configuration.locationType = .outdoor
+        
+        let session = try HKWorkoutSession(healthStore: healthStore, configuration: configuration)
+        self.workoutSession = session
+        sessionStartTime = Date()
+        
+        session.startActivity(with: Date())
+        
+        Logger.logSuccess("✅ Workout HealthKit démarré", category: .general)
+    }
+    
+    /// Termine le workout en cours
+    func endWorkout() async throws {
+        guard let session = workoutSession, let startTime = sessionStartTime else {
+            Logger.log("⚠️ Aucun workout actif", category: .general)
+            return
+        }
+        
+        let endDate = Date()
+        session.end()
+        
+        // Créer un HKWorkout pour sauvegarder dans HealthKit
+        let workout = HKWorkout(
+            activityType: .running,
+            start: startTime,
+            end: endDate,
+            duration: endDate.timeIntervalSince(startTime),
+            totalEnergyBurned: nil,
+            totalDistance: nil,
+            metadata: nil
+        )
+        
+        try await healthStore.save(workout)
+        
+        workoutSession = nil
+        sessionStartTime = nil
+        
+        Logger.logSuccess("✅ Workout sauvegardé dans HealthKit", category: .general)
+    }
+    
+    /// Récupère les calories actives brûlées depuis le début du workout
+    func getActiveEnergyBurned() async -> Double? {
+        guard let startTime = sessionStartTime else { return nil }
+        
+        do {
+            let calories = try await queryCalories(since: startTime)
+            return calories
+        } catch {
+            Logger.logError(error, context: "getActiveEnergyBurned", category: .general)
+            return nil
+        }
+    }
     
     /// Démarre une session d'entraînement HealthKit (pour Apple Watch)
     func startWorkoutSession(activityType: HKWorkoutActivityType = .running) throws {

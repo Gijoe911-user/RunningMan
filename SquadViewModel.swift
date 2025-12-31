@@ -30,6 +30,9 @@ class SquadViewModel {
     /// Message de succès
     var successMessage: String?
     
+    /// Indique si on a déjà tenté de charger les squads (pour éviter un écran de chargement infini)
+    var hasAttemptedLoad = false
+    
     // MARK: - Services
     
     private let squadService = SquadService.shared
@@ -58,6 +61,7 @@ class SquadViewModel {
     func loadUserSquads() async {
         guard let userId = currentUserId else {
             errorMessage = "Utilisateur non connecté"
+            hasAttemptedLoad = true  // Marquer comme tenté même en cas d'erreur
             return
         }
         
@@ -79,6 +83,7 @@ class SquadViewModel {
         }
         
         isLoading = false
+        hasAttemptedLoad = true  // Marquer comme tenté après le chargement
     }
     
     // MARK: - Create Squad
@@ -111,6 +116,10 @@ class SquadViewModel {
             
             successMessage = "Squad créée avec succès ! Code d'invitation : \(newSquad.inviteCode)"
             Logger.logSuccess("Squad créée: \(newSquad.name)", category: .squads)
+            
+            // 🔥 CORRECTION : Rafraîchir l'utilisateur dans AuthViewModel
+            // pour que hasSquad soit mis à jour
+            await refreshAuthUser()
             
             isLoading = false
             return true
@@ -151,6 +160,10 @@ class SquadViewModel {
             
             successMessage = "Vous avez rejoint \(joinedSquad.name) !"
             Logger.logSuccess("Squad rejointe: \(joinedSquad.name)", category: .squads)
+            
+            // 🔥 CORRECTION : Rafraîchir l'utilisateur dans AuthViewModel
+            // pour que hasSquad soit mis à jour
+            await refreshAuthUser()
             
             isLoading = false
             return true
@@ -269,6 +282,33 @@ class SquadViewModel {
     func clearMessages() {
         errorMessage = nil
         successMessage = nil
+    }
+    
+    // MARK: - Refresh Auth User
+    
+    /// Rafraîchit l'utilisateur dans AuthViewModel pour mettre à jour hasSquad
+    /// Appelé après avoir rejoint ou créé une squad
+    private func refreshAuthUser() async {
+        Logger.log("🔄 Rafraîchissement de l'utilisateur dans AuthViewModel", category: .squads)
+        
+        // Récupérer l'AuthViewModel depuis l'environnement n'est pas possible ici
+        // On doit passer par AuthService directement
+        guard let userId = currentUserId else { return }
+        
+        do {
+            if let updatedUser = try await AuthService.shared.getUserProfile(userId: userId) {
+                // Notifier qu'on a besoin de rafraîchir
+                // Le mieux serait d'utiliser NotificationCenter ou un Publisher
+                NotificationCenter.default.post(
+                    name: NSNotification.Name("UserSquadsUpdated"),
+                    object: nil,
+                    userInfo: ["userId": userId]
+                )
+                Logger.logSuccess("✅ Notification envoyée pour rafraîchir l'utilisateur", category: .squads)
+            }
+        } catch {
+            Logger.logError(error, context: "refreshAuthUser", category: .squads)
+        }
     }
     
     // MARK: - Real-time Updates

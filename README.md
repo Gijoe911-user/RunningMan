@@ -1,6 +1,8 @@
 # 🏃‍♂️ RunningMan
 
-**RunningMan** est une application iOS de course collaborative permettant aux utilisateurs de créer des "squads" pour s'entraîner ensemble, partager leurs performances en temps réel, et atteindre leurs objectifs.
+**RunningMan** est une application iOS de course collaborative permettant aux utilisateurs de créer des "squads" pour s'entraîner ensemble, partager leurs performances en temps réel, et atteindre leurs objectifs grâce à un système de gamification et de progression.
+
+**Version actuelle :** v1.1.0 (30 décembre 2024)
 
 ---
 
@@ -11,33 +13,40 @@
 3. [Installation](#-installation)
 4. [Configuration](#-configuration)
 5. [Structure du projet](#-structure-du-projet)
-6. [Glossaire](#-glossaire)
-7. [Roadmap](#-roadmap)
-8. [Contribuer](#-contribuer)
+6. [Documentation](#-documentation)
+7. [Glossaire](#-glossaire)
+8. [Roadmap](#-roadmap)
+9. [Contribuer](#-contribuer)
 
 ---
 
 ## ✨ Fonctionnalités
 
-### ✅ Actuellement disponibles
+### ✅ Actuellement disponibles (v1.1.0)
 
 - **Authentification** : Connexion via email/mot de passe (Firebase Auth)
 - **Gestion des Squads** : Créer et rejoindre des groupes de coureurs
 - **Sessions de course** : Démarrer des sessions solo ou en groupe
 - **Tracking GPS** : Suivi du tracé en temps réel sur carte
 - **Localisation en temps réel** : Voir la position des autres coureurs
-- **Statistiques de base** : Distance, temps écoulé
-- **Widget de stats** : Affichage des métriques en direct pendant la course
+- **Widget de stats** : Distance, temps, BPM, calories en direct
+- **🆕 Système de Progression** : Indice de consistance avec barre colorée
+- **🆕 Objectifs hebdomadaires** : Distance ou durée, suivi automatique
+- **🆕 ProgressionView** : Interface de gamification complète
 
-### 🚧 En développement
+### 🚧 En développement (Phase 1.2)
 
+- **GPS Adaptatif** : Optimisation batterie selon allure
+- **Passage de Relais** : Transfert admin si créateur quitte
 - **HealthKit** : Monitoring cardiaque et calories
 - **Notifications** : Alertes quand un membre démarre une session
+
+### 🔮 À venir (Phases 2-4)
+
 - **Chat textuel** : Communication dans les sessions
 - **Partage de photos** : Capture et partage de moments
-
-### 🔮 À venir (Roadmap)
-
+- **Audio Triggers** : Messages vocaux contextuels
+- **Playlists Adaptatives** : Musique selon allure (Spotify/Apple Music)
 - **Intégrations tierces** : Strava, Garmin Connect
 - **Voice Chat** : Communication vocale push-to-talk
 - **Apple Watch** : App compagnon watchOS
@@ -221,6 +230,26 @@ enum FeatureFlags {
 ```
 
 Les fonctionnalités désactivées n'apparaîtront pas dans l'UI.
+
+---
+
+## 📚 Documentation
+
+### Guides Principaux
+
+- **[PRD.md](./PRD.md)** - Product Requirements Document complet
+- **[LIVRAISON_PHASE_2.md](./LIVRAISON_PHASE_2.md)** - Résumé de la refactorisation v1.1.0
+- **[REFACTORING_SUMMARY.md](./REFACTORING_SUMMARY.md)** - Guide de migration et prochaines étapes
+- **[FIRESTORE_MIGRATION_V2.md](./FIRESTORE_MIGRATION_V2.md)** - Scripts de migration base de données
+
+### Guides Techniques
+
+- **[SESSION_VISIBILITY_FIX.md](./SESSION_VISIBILITY_FIX.md)** - Correction bugs de synchronisation sessions
+- **[INTEGRATION_GUIDE_WIDGETS.md](./INTEGRATION_GUIDE_WIDGETS.md)** - Intégration des widgets de stats
+
+### Architecture
+
+- **[REFACTORING_PLAN.md](./REFACTORING_PLAN.md)** - Plan détaillé de l'architecture Services
 
 ---
 

@@ -147,16 +147,40 @@ struct SessionsListView: View {
     private var toolbarContent: some ToolbarContent {
         ToolbarItem(placement: .primaryAction) {
             Button {
-                if squadsVM.selectedSquad != nil {
+                if squadsVM.selectedSquad != nil && canCreateSession {
                     showCreateSession = true
                 }
             } label: {
                 Image(systemName: "plus.circle.fill")
-                    .foregroundColor(.coralAccent)
+                    .foregroundColor(canCreateSession ? .coralAccent : .gray)
                     .font(.title2)
             }
-            .disabled(squadsVM.selectedSquad == nil)
+            .disabled(!canCreateSession)
         }
+    }
+    
+    /// Vérifie si l'utilisateur peut créer une session
+    private var canCreateSession: Bool {
+        guard let squad = squadsVM.selectedSquad,
+              let userId = AuthService.shared.currentUserId else {
+            return false
+        }
+        
+        // Autoriser le créateur de la squad
+        if squad.creatorId == userId {
+            return true
+        }
+        
+        // Autoriser les admins
+        if let role = squad.members[userId], role == .admin {
+            return true
+        }
+        
+        // ✅ OPTION 1: Autoriser TOUS les membres (recommandé)
+        // return squad.members[userId] != nil
+        
+        // ✅ OPTION 2: Restreindre aux admins uniquement (strict)
+        return false
     }
     
     // MARK: - Actions
