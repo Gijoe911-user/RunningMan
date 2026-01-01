@@ -65,18 +65,25 @@ class SquadViewModel {
             return
         }
         
+        // 🔥 CORRECTION : Réinitialiser hasAttemptedLoad au début pour forcer le chargement
+        hasAttemptedLoad = false
         isLoading = true
         errorMessage = nil
+        
+        Logger.log("🔄 Début du chargement des squads pour userId: \(userId)", category: .squads)
         
         do {
             userSquads = try await squadService.getUserSquads(userId: userId)
             
+            Logger.log("📊 Squads récupérées: \(userSquads.count)", category: .squads)
+            
             // Sélectionner automatiquement la première squad si aucune n'est sélectionnée
             if selectedSquad == nil, let firstSquad = userSquads.first {
                 selectedSquad = firstSquad
+                Logger.log("✅ Première squad sélectionnée: \(firstSquad.name)", category: .squads)
             }
             
-            Logger.logSuccess("Squads chargées: \(userSquads.count)", category: .squads)
+            Logger.logSuccess("✅ Squads chargées: \(userSquads.count), hasSquads: \(hasSquads)", category: .squads)
         } catch {
             Logger.logError(error, context: "loadUserSquads", category: .squads)
             errorMessage = "Erreur lors du chargement des squads"

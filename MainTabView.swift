@@ -32,8 +32,8 @@ struct MainTabView: View {
                     }
                     .tag(1)
                 
-                // Onglet 2 : Sessions (Liste complète) ← Vue corrigée !
-                AllSessionsView()
+                // Onglet 2 : Sessions (Liste complète) ← Vue unifiée avec SessionRowCard
+                AllSessionsViewUnified()
                     .tabItem {
                         Label("Sessions", systemImage: "list.bullet.rectangle.fill")
                     }

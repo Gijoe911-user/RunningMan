@@ -57,53 +57,49 @@ struct UserModel: Identifiable, Codable, Hashable {
     /// - `> 0.75` : Vert (Excellence)
     /// - `0.50 - 0.75` : Jaune (Alerte)
     /// - `< 0.50` : Rouge (Réajustement suggéré)
-    var consistencyRate: Double = 0.0
+    var consistencyRate: Double?  // ✅ Optionnel pour compatibilité
     
     /// Objectifs hebdomadaires en cours et historique
     ///
     /// Limité aux 12 dernières semaines pour optimiser les performances.
-    var weeklyGoals: [WeeklyGoal] = []
+    var weeklyGoals: [WeeklyGoal]?  // ✅ Optionnel pour compatibilité
     
     /// Distance totale parcourue (lifetime, en mètres)
-    var totalDistance: Double = 0.0
+    var totalDistance: Double?  // ✅ Optionnel pour compatibilité
     
     /// Nombre total de sessions complétées
-    var totalSessions: Int = 0
+    var totalSessions: Int?  // ✅ Optionnel pour compatibilité
     
     // MARK: Metadata
     
     /// Date de création du compte
-    var createdAt: Date
+    var createdAt: Date?  // ✅ Optionnel pour compatibilité
     
     /// Dernière connexion
-    var lastSeen: Date
+    var lastSeen: Date?  // ✅ Optionnel pour compatibilité
     
     /// IDs des squads auxquelles l'utilisateur appartient
-    var squads: [String] = []
+    var squads: [String]?  // ✅ Optionnel pour compatibilité
+    
+    /// Préférences utilisateur (ancienne structure, peut être absente)
+    var preferences: UserPreferences?  // ✅ Optionnel
     
     // MARK: - Computed Properties
     
     /// Taux de consistance en pourcentage (0-100)
     var consistencyPercentage: Int {
-        Int(consistencyRate * 100)
+        Int((consistencyRate ?? 0.0) * 100)
     }
     
     /// Couleur de la barre de progression selon le taux
     var consistencyColor: ProgressionColor {
-        switch consistencyRate {
-        case 0.75...1.0:
-            return .excellent
-        case 0.5..<0.75:
-            return .warning
-        default:
-            return .critical
-        }
+        ProgressionService.shared.getProgressionColor(for: consistencyRate ?? 0.0)
     }
     
     /// Objectifs de la semaine en cours
     var currentWeekGoals: [WeeklyGoal] {
         let startOfWeek = Calendar.current.startOfWeek(for: Date())
-        return weeklyGoals.filter { Calendar.current.isDate($0.weekStartDate, equalTo: startOfWeek, toGranularity: .weekOfYear) }
+        return (weeklyGoals ?? []).filter { Calendar.current.isDate($0.weekStartDate, equalTo: startOfWeek, toGranularity: .weekOfYear) }
     }
     
     /// Initiales pour l'avatar fallback
@@ -122,13 +118,14 @@ struct UserModel: Identifiable, Codable, Hashable {
         email: String,
         avatarUrl: String? = nil,
         bio: String? = nil,
-        consistencyRate: Double = 0.0,
-        weeklyGoals: [WeeklyGoal] = [],
-        totalDistance: Double = 0.0,
-        totalSessions: Int = 0,
-        createdAt: Date = Date(),
-        lastSeen: Date = Date(),
-        squads: [String] = []
+        consistencyRate: Double? = nil,
+        weeklyGoals: [WeeklyGoal]? = nil,
+        totalDistance: Double? = nil,
+        totalSessions: Int? = nil,
+        createdAt: Date? = nil,
+        lastSeen: Date? = nil,
+        squads: [String]? = nil,
+        preferences: UserPreferences? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -142,6 +139,7 @@ struct UserModel: Identifiable, Codable, Hashable {
         self.createdAt = createdAt
         self.lastSeen = lastSeen
         self.squads = squads
+        self.preferences = preferences
     }
     
     // MARK: - Hashable
@@ -157,12 +155,8 @@ struct UserModel: Identifiable, Codable, Hashable {
 
 // MARK: - Supporting Types
 
-/// Couleur de progression selon le taux de consistance
-enum ProgressionColor: String, Codable {
-    case excellent = "GREEN"
-    case warning = "YELLOW"
-    case critical = "RED"
-}
+// Note: ProgressionColor est défini dans ProgressionService.swift
+// pour respecter le principe DRY (Don't Repeat Yourself)
 
 // MARK: - Calendar Extension
 
@@ -188,7 +182,7 @@ extension UserModel {
     
     /// Anciennement squadIds, maintenant squads
     var squadIds: [String] {
-        get { squads }
+        get { squads ?? [] }
         set { squads = newValue }
     }
     
@@ -199,32 +193,28 @@ extension UserModel {
     
     /// Indique si l'utilisateur fait partie d'au moins une squad
     var hasSquad: Bool {
-        !squads.isEmpty
+        !(squads ?? []).isEmpty
     }
     
     /// Indique si l'utilisateur a complété au moins une course
     var hasCompletedRace: Bool {
-        totalSessions > 0
+        (totalSessions ?? 0) > 0
     }
     
     /// Distance totale en kilomètres
     var totalDistanceKm: Double {
-        totalDistance / 1000
+        (totalDistance ?? 0.0) / 1000
     }
-    
-    /// Anciennement UserPreferences (si tu ne les as pas encore migrées)
-    /// Il vaut mieux garder l'objet en attendant de le refactoriser
-    // var preferences: UserPreferences ...
 }
 
 /// Objet temporaire pour simuler l'ancienne structure de statistiques
 struct UserStatisticsBridge {
     let parent: UserModel
     
-    var totalDistanceMeters: Double { parent.totalDistance }
-    var totalRaces: Int { parent.totalSessions } // Approximation
+    var totalDistanceMeters: Double { parent.totalDistance ?? 0.0 }
+    var totalRaces: Int { parent.totalSessions ?? 0 } // Approximation
     var totalTrainings: Int { 0 } // À mapper si besoin
-    var squadsJoined: Int { parent.squads.count }
+    var squadsJoined: Int { (parent.squads ?? []).count }
     var totalTimeSeconds: Double { 0 } // À mapper si besoin dans le futur
     var audioMessagesSent: Int { 0 } // À mapper si besoin dans le futur
     var cheersReceived: Int { 0 } // À mapper si besoin dans le futur

@@ -49,7 +49,8 @@ class RouteTrackingService {
     
     // MARK: - Auto-Save
     
-    /// Démarre la sauvegarde automatique du tracé toutes les 30 secondes
+    /// Démarre la sauvegarde automatique du tracé toutes les 3 minutes (180 secondes)
+    /// 🎯 Sauvegarde régulière pour éviter la perte de données en cas de crash ou batterie faible
     func startAutoSave(sessionId: String, userId: String) {
         currentSessionId = sessionId
         currentUserId = userId
@@ -57,14 +58,14 @@ class RouteTrackingService {
         // Annuler le timer précédent si existant
         stopAutoSave()
         
-        // Créer un nouveau timer (toutes les 30 secondes)
-        autoSaveTimer = Timer.scheduledTimer(withTimeInterval: 30.0, repeats: true) { [weak self] _ in
+        // Créer un nouveau timer (toutes les 3 minutes = 180 secondes)
+        autoSaveTimer = Timer.scheduledTimer(withTimeInterval: 180.0, repeats: true) { [weak self] _ in
             Task {
                 await self?.autoSaveRoute()
             }
         }
         
-        Logger.log("🔄 Auto-sauvegarde activée (30s)", category: .location)
+        Logger.log("🔄 Auto-sauvegarde activée (toutes les 3 minutes)", category: .location)
     }
     
     /// Arrête la sauvegarde automatique

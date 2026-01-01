@@ -15,13 +15,13 @@ struct RootView: View {
     
     var body: some View {
         Group {
-            if authVM.isLoading || (authVM.isAuthenticated && squadVM.userSquads.isEmpty && !squadVM.hasAttemptedLoad) {
+            if authVM.isLoading || (authVM.isAuthenticated && !squadVM.hasAttemptedLoad) {
                 // Écran de chargement initial OU chargement des squads
                 loadingView
                     .transition(.opacity)
             } else if authVM.isAuthenticated {
                 // Utilisateur connecté
-                if authVM.hasSquad {
+                if squadVM.hasSquads {
                     // A déjà rejoint ou créé un squad
                     MainTabView()
                         .transition(.move(edge: .trailing).combined(with: .opacity))
@@ -38,12 +38,26 @@ struct RootView: View {
         }
         .animation(.easeInOut(duration: 0.3), value: authVM.isLoading)
         .animation(.easeInOut(duration: 0.3), value: authVM.isAuthenticated)
-        .animation(.easeInOut(duration: 0.3), value: authVM.hasSquad)
+        .animation(.easeInOut(duration: 0.3), value: squadVM.hasSquads)
         .task(id: authVM.isAuthenticated) {
             // Charger les squads automatiquement quand l'utilisateur se connecte
             if authVM.isAuthenticated {
+                Logger.log("🔄 Chargement des squads après authentification", category: .ui)
                 await squadVM.loadUserSquads()
+                Logger.log("✅ Squads chargées: \(squadVM.userSquads.count), hasSquads: \(squadVM.hasSquads)", category: .ui)
             }
+        }
+        .onChange(of: authVM.isAuthenticated) { oldValue, newValue in
+            Logger.log("🔄 isAuthenticated changé: \(oldValue) -> \(newValue)", category: .ui)
+        }
+        .onChange(of: squadVM.hasAttemptedLoad) { oldValue, newValue in
+            Logger.log("🔄 hasAttemptedLoad changé: \(oldValue) -> \(newValue)", category: .ui)
+        }
+        .onChange(of: squadVM.hasSquads) { oldValue, newValue in
+            Logger.log("🔄 hasSquads changé: \(oldValue) -> \(newValue)", category: .ui)
+        }
+        .onChange(of: authVM.isLoading) { oldValue, newValue in
+            Logger.log("🔄 isLoading changé: \(oldValue) -> \(newValue)", category: .ui)
         }
     }
     

@@ -89,7 +89,7 @@ final class ProgressionService: ObservableObject {
             
             // Filtrer les objectifs des 12 dernières semaines
             let twelveWeeksAgo = Calendar.current.date(byAdding: .weekOfYear, value: -12, to: Date()) ?? Date()
-            let recentGoals = user.weeklyGoals.filter { $0.weekStartDate >= twelveWeeksAgo }
+            let recentGoals = (user.weeklyGoals ?? []).filter { $0.weekStartDate >= twelveWeeksAgo }
             
             guard !recentGoals.isEmpty else {
                 Logger.log("ℹ️ Aucun objectif récent trouvé", category: .service)
@@ -165,7 +165,7 @@ final class ProgressionService: ObservableObject {
             let startOfWeek = Calendar.current.startOfWeek(for: Date())
             
             // Filtrer les objectifs de cette semaine
-            var weekGoals = user.weeklyGoals.filter {
+            var weekGoals = (user.weeklyGoals ?? []).filter {
                 Calendar.current.isDate($0.weekStartDate, equalTo: startOfWeek, toGranularity: .weekOfYear)
             }
             
@@ -196,10 +196,15 @@ final class ProgressionService: ObservableObject {
             }
             
             if updated {
+                // Initialiser weeklyGoals si nil
+                if user.weeklyGoals == nil {
+                    user.weeklyGoals = []
+                }
+                
                 // Mettre à jour les objectifs dans le tableau complet
                 for goal in weekGoals {
-                    if let index = user.weeklyGoals.firstIndex(where: { $0.id == goal.id }) {
-                        user.weeklyGoals[index] = goal
+                    if let index = user.weeklyGoals?.firstIndex(where: { $0.id == goal.id }) {
+                        user.weeklyGoals?[index] = goal
                     }
                 }
                 
@@ -254,7 +259,7 @@ final class ProgressionService: ObservableObject {
             )
             
             // Vérifier qu'il n'existe pas déjà un objectif du même type cette semaine
-            let existingGoal = user.weeklyGoals.first {
+            let existingGoal = (user.weeklyGoals ?? []).first {
                 $0.targetType == type &&
                 Calendar.current.isDate($0.weekStartDate, equalTo: startOfWeek, toGranularity: .weekOfYear)
             }
@@ -263,12 +268,17 @@ final class ProgressionService: ObservableObject {
                 throw ProgressionError.goalAlreadyExists
             }
             
+            // Initialiser weeklyGoals si nil
+            if user.weeklyGoals == nil {
+                user.weeklyGoals = []
+            }
+            
             // Ajouter à la liste
-            user.weeklyGoals.append(newGoal)
+            user.weeklyGoals?.append(newGoal)
             
             // Nettoyer les objectifs de plus de 12 semaines
             let twelveWeeksAgo = Calendar.current.date(byAdding: .weekOfYear, value: -12, to: Date()) ?? Date()
-            user.weeklyGoals = user.weeklyGoals.filter { $0.weekStartDate >= twelveWeeksAgo }
+            user.weeklyGoals = user.weeklyGoals?.filter { $0.weekStartDate >= twelveWeeksAgo }
             
             // Sauvegarder
             try db.collection("users").document(userId).setData(from: user, merge: true)
@@ -301,13 +311,13 @@ final class ProgressionService: ObservableObject {
             let user = try userDoc.data(as: UserModel.self)
             
             let startOfWeek = Calendar.current.startOfWeek(for: Date())
-            let goals = user.weeklyGoals.filter {
+            let goals = (user.weeklyGoals ?? []).filter {
                 Calendar.current.isDate($0.weekStartDate, equalTo: startOfWeek, toGranularity: .weekOfYear)
             }
             
             await MainActor.run {
                 self.currentWeekGoals = goals
-                self.consistencyRate = user.consistencyRate
+                self.consistencyRate = user.consistencyRate ?? 0.0
             }
             
             Logger.logSuccess("✅ \(goals.count) objectif(s) chargé(s)", category: .service)
@@ -324,10 +334,12 @@ final class ProgressionService: ObservableObject {
     /// - Jaune : 50-74%
     /// - Rouge : < 50%
     ///
-    /// - Parameter rate: Taux de consistance (0.0 - 1.0)
-    /// - Returns: Couleur SwiftUI
-    func getProgressionColor(for rate: Double) -> ProgressionColor {
-        switch rate {
+    /// - Parameter rate: Taux de consistance (0.0 - 1.0), peut être nil
+    /// - Returns: Couleur de progression
+    func getProgressionColor(for rate: Double? = nil) -> ProgressionColor {
+        let safeRate = rate ?? self.consistencyRate
+        
+        switch safeRate {
         case 0.75...1.0:
             return .excellent
         case 0.5..<0.75:

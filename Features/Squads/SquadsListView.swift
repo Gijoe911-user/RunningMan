@@ -46,15 +46,17 @@ struct SquadListView: View {
                 JoinSquadView()
             }
             .task {
-                // Charger les squads au premier affichage
-                await squadVM.loadUserSquads()
+                // Charger les squads seulement si pas encore chargés
+                if !squadVM.hasAttemptedLoad {
+                    await squadVM.loadUserSquads()
+                }
                 
-                // Démarrer l'observation en temps réel
-                squadVM.startObservingSquads()
+                // 🔥 TEMPORAIRE : Désactivé pour éviter la boucle infinie
+                // TODO: Vérifier pourquoi le stream Firebase déclenche trop de mises à jour
+                // squadVM.startObservingSquads()
             }
             .onDisappear {
-                // Optionnel : arrêter l'observation quand la vue disparaît
-                // Commenté pour garder la sync active en arrière-plan
+                // Arrêter l'observation quand la vue disparaît
                 // squadVM.stopObservingSquads()
             }
         }

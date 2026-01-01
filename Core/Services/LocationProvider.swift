@@ -16,6 +16,8 @@ final class LocationProvider: NSObject, ObservableObject {
     
     // Sorties observables
     @Published private(set) var currentCoordinate: CLLocationCoordinate2D?
+    @Published private(set) var currentSpeed: Double = 0.0  // m/s
+    @Published private(set) var currentAltitude: Double = 0.0  // mètres
     @Published private(set) var authorizationStatus: CLAuthorizationStatus = .notDetermined
     @Published private(set) var isUpdating: Bool = false
     
@@ -76,6 +78,13 @@ extension LocationProvider: CLLocationManagerDelegate {
         guard let last = locations.last else { return }
         Task { @MainActor in
             currentCoordinate = last.coordinate
+            
+            // Vitesse (m/s) - CLLocation fournit déjà la vitesse
+            // Si négative, c'est invalide → on met 0
+            currentSpeed = max(0, last.speed)
+            
+            // Altitude
+            currentAltitude = last.altitude
         }
     }
     

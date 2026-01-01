@@ -125,7 +125,7 @@ struct ProgressionView: View {
                 
                 Spacer()
                 
-                Text("\(progressionService.consistencyRate, specifier: "%.0f")%")
+                Text("\(Int(progressionService.consistencyRate * 100))%")
                     .font(.title)
                     .fontWeight(.bold)
                     .foregroundColor(colorForRate)
@@ -243,19 +243,20 @@ struct ProgressionView: View {
     
     /// Couleur selon le taux de consistance
     private var colorForRate: Color {
-        switch progressionService.consistencyRate {
-        case 0.75...1.0: return .green
-        case 0.5..<0.75: return .yellow
-        default: return .red
-        }
+        progressionService.getProgressionColor().color
     }
     
     /// Dégradé de couleurs pour la barre
     private var gradientColors: [Color] {
-        switch progressionService.consistencyRate {
-        case 0.75...1.0: return [.green, .mint]
-        case 0.5..<0.75: return [.orange, .yellow]
-        default: return [.red, .orange]
+        let baseColor = progressionService.getProgressionColor().color
+        
+        switch progressionService.getProgressionColor() {
+        case .excellent:
+            return [.green, .mint]
+        case .warning:
+            return [.orange, .yellow]
+        case .critical:
+            return [.red, .orange]
         }
     }
     
