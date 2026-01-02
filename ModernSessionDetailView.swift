@@ -397,40 +397,15 @@ struct ModernSessionDetailView: View {
     
     private func formatDuration(_ startTime: Date) -> String {
         let duration = Date().timeIntervalSince(startTime)
-        let minutes = Int(duration) / 60
-        let hours = minutes / 60
+        let totalMinutes = Int(duration) / 60
+        let hours = totalMinutes / 60
+        let remainingMinutes = totalMinutes - (hours * 60)
         
         if hours > 0 {
-            return String(format: "%dh %02dm", hours, minutes % 60)
+            return String(format: "%dh %02dm", hours, remainingMinutes)
         } else {
-            return String(format: "%dm", minutes)
+            return String(format: "%dm", totalMinutes)
         }
-    }
-}
-
-// MARK: - Stat Item
-
-struct SessionStatItem: View {
-    let icon: String
-    let value: String
-    let unit: String
-    let color: Color
-    
-    var body: some View {
-        VStack(spacing: Spacing.xs) {
-            Image(systemName: icon)
-                .font(.system(size: 24))
-                .foregroundColor(color)
-            
-            Text(value)
-                .font(Font.system(size: 24, weight: .bold, design: .rounded))
-                .foregroundColor(.white)
-            
-            Text(unit)
-                .font(Font.system(size: 11, weight: .medium))
-                .foregroundColor(Color.white.opacity(0.6))
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 

@@ -69,14 +69,20 @@ class SessionService {
         Logger.log("Création d'une nouvelle session pour squad: \(squadId)", category: .session)
         print("🔨 createSession appelé pour squadId: \(squadId)")
         
+        // 🆕 Initialiser l'état du créateur comme "waiting"
+        let initialParticipantStates: [String: ParticipantSessionState] = [
+            creatorId: .waiting()
+        ]
+        
         // Créer la session localement (sans ID, @DocumentID le gérera)
         let session = SessionModel(
             squadId: squadId,
             creatorId: creatorId,
             startedAt: Date(),
-            status: .active,
+            status: .scheduled, // 🆕 Commence en "scheduled", devient "active" quand premier participant démarre
             participants: [creatorId],
-            startLocation: startLocation
+            startLocation: startLocation,
+            participantStates: initialParticipantStates
         )
         
         let sessionRef = db.collection("sessions").document()
@@ -127,6 +133,8 @@ class SessionService {
             do {
                 try await sessionRef.updateData([
                     "participants": FieldValue.arrayUnion([userId]),
+                    // 🆕 Initialiser l'état du nouveau participant comme "waiting"
+                    "participantStates.\(userId).status": ParticipantStatus.waiting.rawValue,
                     "updatedAt": FieldValue.serverTimestamp()
                 ])
                 Logger.log("✅ Participant ajouté à la session", category: .service)
@@ -246,12 +254,223 @@ class SessionService {
         return session
     }
     
+    // MARK: - Participant Tracking Management
+    
+    /// 🆕 Démarre le tracking pour un participant spécifique
+    ///
+    /// Marque le participant comme "actif" dans la session. Si c'est le premier
+    /// participant à démarrer, la session passe de "scheduled" à "active".
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur qui démarre
+    /// - Throws: `SessionError` si la session n'existe pas
+    func startParticipantTracking(
+        sessionId: String,
+        userId: String
+    ) async throws {
+        Logger.log("🚀 Démarrage tracking pour participant: \(userId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        // Mettre à jour l'état du participant
+        try await sessionRef.updateData([
+            "participantStates.\(userId).status": ParticipantStatus.active.rawValue,
+            "participantStates.\(userId).startedAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        // Vérifier si c'est le premier participant à démarrer
+        let document = try await sessionRef.getDocument()
+        guard let session = try? document.data(as: SessionModel.self) else {
+            throw SessionError.invalidSession
+        }
+        
+        // Si la session est encore "scheduled", l'activer
+        if session.status == .scheduled {
+            try await sessionRef.updateData([
+                "status": SessionStatus.active.rawValue,
+                "startedAt": FieldValue.serverTimestamp()
+            ])
+            Logger.log("✅ Session activée (premier participant)", category: .session)
+        }
+        
+        Logger.logSuccess("✅ Tracking démarré pour participant \(userId)", category: .session)
+    }
+    
+    /// 🆕 Termine le tracking pour un participant spécifique
+    ///
+    /// Marque le participant comme ayant terminé sa course. Ne termine PAS
+    /// la session entière - les autres participants peuvent continuer.
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur qui termine
+    ///   - finalDistance: Distance finale en mètres
+    ///   - finalDuration: Durée finale en secondes
+    /// - Throws: `SessionError` si la session n'existe pas
+    func endParticipantTracking(
+        sessionId: String,
+        userId: String,
+        finalDistance: Double,
+        finalDuration: TimeInterval
+    ) async throws {
+        Logger.log("🏁 Fin du tracking pour participant: \(userId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        // Mettre à jour l'état du participant
+        try await sessionRef.updateData([
+            "participantStates.\(userId).status": ParticipantStatus.ended.rawValue,
+            "participantStates.\(userId).endedAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        // Mettre à jour les stats finales du participant
+        try await updateParticipantStats(
+            sessionId: sessionId,
+            userId: userId,
+            distance: finalDistance,
+            duration: finalDuration,
+            averageSpeed: finalDuration > 0 ? finalDistance / finalDuration : 0,
+            maxSpeed: 0 // Sera mis à jour par le tracking GPS
+        )
+        
+        Logger.logSuccess("✅ Participant \(userId) a terminé sa course", category: .session)
+    }
+    
+    /// 🆕 Marque un participant comme ayant abandonné
+    ///
+    /// Le participant est marqué comme "abandoned" mais ses statistiques
+    /// partielles sont conservées.
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur qui abandonne
+    /// - Throws: `SessionError` si la session n'existe pas
+    func abandonParticipantTracking(
+        sessionId: String,
+        userId: String
+    ) async throws {
+        Logger.log("⚠️ Abandon pour participant: \(userId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        try await sessionRef.updateData([
+            "participantStates.\(userId).status": ParticipantStatus.abandoned.rawValue,
+            "participantStates.\(userId).endedAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        Logger.log("✅ Participant \(userId) marqué comme abandonné", category: .session)
+    }
+    
+    /// 🆕 Met en pause le tracking d'un participant
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur qui se met en pause
+    /// - Throws: `SessionError` si la session n'existe pas
+    func pauseParticipantTracking(
+        sessionId: String,
+        userId: String
+    ) async throws {
+        Logger.log("⏸️ Pause tracking pour participant: \(userId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        try await sessionRef.updateData([
+            "participantStates.\(userId).status": ParticipantStatus.paused.rawValue,
+            "participantStates.\(userId).lastPausedAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        Logger.log("✅ Participant \(userId) en pause", category: .session)
+    }
+    
+    /// 🆕 Reprend le tracking d'un participant après une pause
+    ///
+    /// Calcule automatiquement la durée de pause et l'ajoute au total.
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur qui reprend
+    /// - Throws: `SessionError` si la session n'existe pas
+    func resumeParticipantTracking(
+        sessionId: String,
+        userId: String
+    ) async throws {
+        Logger.log("▶️ Reprise tracking pour participant: \(userId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        // Récupérer l'état actuel pour calculer la durée de pause
+        let document = try await sessionRef.getDocument()
+        guard let session = try? document.data(as: SessionModel.self),
+              let participantState = session.participantStates?[userId],
+              let lastPausedAt = participantState.lastPausedAt else {
+            throw SessionError.invalidSession
+        }
+        
+        // Calculer la durée de pause
+        let pauseDuration = Date().timeIntervalSince(lastPausedAt)
+        let totalPausedDuration = participantState.pausedDuration + pauseDuration
+        
+        try await sessionRef.updateData([
+            "participantStates.\(userId).status": ParticipantStatus.active.rawValue,
+            "participantStates.\(userId).pausedDuration": totalPausedDuration,
+            "participantStates.\(userId).lastPausedAt": FieldValue.delete(), // Supprimer lastPausedAt
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        Logger.log("✅ Participant \(userId) a repris", category: .session)
+    }
+    
+    /// 🆕 Vérifie si tous les participants ont fini et termine la session si nécessaire
+    ///
+    /// Appelé automatiquement après qu'un participant termine ou abandonne.
+    /// Si tous les participants ont fini (ended ou abandoned), la session
+    /// est automatiquement terminée.
+    ///
+    /// - Parameter sessionId: ID de la session à vérifier
+    /// - Throws: `SessionError` si la session n'existe pas
+    func checkAndEndSessionIfComplete(sessionId: String) async throws {
+        Logger.log("🔍 Vérification si session peut être terminée: \(sessionId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        let document = try await sessionRef.getDocument()
+        
+        guard let session = try? document.data(as: SessionModel.self) else {
+            throw SessionError.invalidSession
+        }
+        
+        // Vérifier si tous les participants ont fini
+        if session.canBeEnded {
+            Logger.log("✅ Tous les participants ont terminé, fin automatique de session", category: .session)
+            try await endSession(sessionId: sessionId)
+        } else {
+            let activeCount = session.activeParticipantsCount
+            let pausedCount = session.pausedParticipantsCount
+            Logger.log("ℹ️ Session continue : \(activeCount) actif(s), \(pausedCount) en pause", category: .session)
+        }
+    }
+    
     // MARK: - End Session
     
-    /// Termine une session - Version RAPIDE avec fire-and-forget
-    /// Retourne immédiatement après avoir lancé les opérations en arrière-plan
+    /// Termine une session pour TOUS les participants
+    ///
+    /// ⚠️ **Important :** Cette fonction termine la session globalement.
+    /// Elle devrait être appelée UNIQUEMENT dans ces cas :
+    /// - Tous les participants ont fini/abandonné (via `checkAndEndSessionIfComplete`)
+    /// - Timeout atteint (ex: 4h après le démarrage)
+    /// - Annulation manuelle par un admin de la squad
+    ///
+    /// Pour terminer le tracking d'UN SEUL participant, utilisez `endParticipantTracking()`.
+    ///
+    /// - Parameter sessionId: ID de la session à terminer
+    /// - Throws: `SessionError` si la session n'existe pas
     func endSession(sessionId: String) async throws {
-        Logger.log("🛑 Tentative de fin de session: \(sessionId)", category: .session)
+        Logger.log("🛑 Fin de session pour tous les participants: \(sessionId)", category: .session)
         
         let sessionRef = db.collection("sessions").document(sessionId)
         

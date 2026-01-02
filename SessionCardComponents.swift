@@ -23,11 +23,11 @@ struct TrackingSessionCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(session.activityType.displayName.uppercased())
                         .font(.caption.bold())
-                        .foregroundColor(.coralAccent)
+                        .foregroundColor(Color.coralAccent)
                     
                     Text("Session en cours")
                         .font(.title3.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(Color.white)
                 }
                 
                 Spacer()
@@ -39,7 +39,7 @@ struct TrackingSessionCard: View {
                     
                     Text(state.displayName)
                         .font(.caption)
-                        .foregroundColor(.white.opacity(0.8))
+                        .foregroundColor(Color.white.opacity(0.8))
                 }
             }
             
@@ -48,11 +48,11 @@ struct TrackingSessionCard: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("DISTANCE")
                         .font(.caption2)
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(Color.white.opacity(0.6))
                     
                     Text(FormatHelper.formattedDistance(distance))
                         .font(.title2.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(Color.white)
                 }
                 
                 Spacer()
@@ -60,22 +60,22 @@ struct TrackingSessionCard: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("DURÉE")
                         .font(.caption2)
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(Color.white.opacity(0.6))
                     
                     Text(FormatHelper.formattedDuration(duration))
                         .font(.title2.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(Color.white)
                 }
             }
             
             // Indicateur de navigation
             HStack {
                 Image(systemName: "chevron.right.circle.fill")
-                    .foregroundColor(.coralAccent)
+                    .foregroundColor(Color.coralAccent)
                 
                 Text("Voir les détails")
                     .font(.subheadline)
-                    .foregroundColor(.coralAccent)
+                    .foregroundColor(Color.coralAccent)
                 
                 Spacer()
             }
@@ -104,10 +104,10 @@ struct TrackingSessionCard: View {
     
     private var stateColor: Color {
         switch state {
-        case .idle: return .gray
-        case .active: return .green
-        case .paused: return .orange
-        case .stopping: return .red
+        case .idle: return Color.gray
+        case .active: return Color.green
+        case .paused: return Color.orange
+        case .stopping: return Color.red
         }
     }
 }
@@ -126,17 +126,17 @@ struct SupporterSessionCard: View {
                 
                 Image(systemName: "eyes.inverse")
                     .font(.title3)
-                    .foregroundColor(.blue)
+                    .foregroundColor(Color.blue)
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.activityType.displayName)
                     .font(.caption.bold())
-                    .foregroundColor(.blue)
+                    .foregroundColor(Color.blue)
                 
                 Text("\(session.participants.count) coureurs en live")
                     .font(.subheadline.bold())
-                    .foregroundColor(.white)
+                    .foregroundColor(Color.white)
                 
                 HStack(spacing: 8) {
                     Label(session.formattedDistance, systemImage: "figure.run")
@@ -144,13 +144,13 @@ struct SupporterSessionCard: View {
                     Label(session.formattedSessionDuration, systemImage: "clock")
                 }
                 .font(.caption2)
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(Color.white.opacity(0.5))
             }
             
             Spacer()
             
             Image(systemName: "chevron.right")
-                .foregroundColor(.white.opacity(0.3))
+                .foregroundColor(Color.white.opacity(0.3))
         }
         .padding()
         .background(Color.blue.opacity(0.05))
@@ -176,18 +176,18 @@ struct HistorySessionCard: View {
                 
                 Image(systemName: session.activityType.icon)
                     .font(.title3)
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(Color.white.opacity(0.5))
             }
             
             VStack(alignment: .leading, spacing: 4) {
                 Text(session.activityType.displayName)
                     .font(.caption.bold())
-                    .foregroundColor(.white.opacity(0.5))
+                    .foregroundColor(Color.white.opacity(0.5))
                 
                 if let endedAt = session.endedAt {
                     Text(endedAt.formattedDateTime)
                         .font(.subheadline.bold())
-                        .foregroundColor(.white)
+                        .foregroundColor(Color.white)
                 }
                 
                 HStack(spacing: 8) {
@@ -196,17 +196,42 @@ struct HistorySessionCard: View {
                     Label(session.formattedSessionDuration, systemImage: "clock")
                 }
                 .font(.caption2)
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundColor(Color.white.opacity(0.5))
             }
             
             Spacer()
             
             Image(systemName: "chevron.right")
-                .foregroundColor(.white.opacity(0.3))
+                .foregroundColor(Color.white.opacity(0.3))
         }
         .padding()
         .background(Color.white.opacity(0.02))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+// MARK: - Stat Badge Compact (Badge de statistique compact)
+
+struct StatBadgeCompact: View {
+    let icon: String
+    let value: String
+    let label: String
+    
+    var body: some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+                .font(.caption)
+                .foregroundColor(Color.coralAccent)
+            
+            Text(value)
+                .font(.caption.bold())
+                .foregroundColor(Color.white)
+            
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(Color.white.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

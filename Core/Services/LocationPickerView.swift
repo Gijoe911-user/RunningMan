@@ -1,0 +1,322 @@
+//
+//  LocationPickerView.swift
+//  RunningMan
+//
+//  Composant réutilisable pour choisir un lieu de rendez-vous
+//  Utilisé dans la création de sessions
+//
+
+import SwiftUI
+import MapKit
+
+/// Vue pour sélectionner un lieu de rendez-vous sur une carte
+///
+/// Fonctionnalités :
+/// - Sélection d'un point sur la carte
+/// - Recherche de lieux par nom
+/// - Géolocalisation de l'utilisateur
+/// - Résolution du nom à partir des coordonnées (reverse geocoding)
+struct LocationPickerView: View {
+    
+    // MARK: - Properties
+    
+    @Environment(\.dismiss) private var dismiss
+    @Binding var selectedLocation: String
+    @Binding var selectedCoordinate: CLLocationCoordinate2D?
+    
+    @State private var mapPosition: MapCameraPosition = .automatic
+    @State private var searchText: String = ""
+    @State private var isSearching: Bool = false
+    @State private var searchResults: [MKMapItem] = []
+    @State private var tempCoordinate: CLLocationCoordinate2D?
+    @State private var tempLocationName: String = ""
+    
+    // MARK: - Body
+    
+    var body: some View {
+        NavigationStack {
+            ZStack {
+                Color.darkNavy
+                    .ignoresSafeArea()
+                
+                VStack(spacing: 0) {
+                    // Barre de recherche
+                    searchBar
+                    
+                    // Carte
+                    mapView
+                    
+                    // Informations sélectionnées
+                    if !tempLocationName.isEmpty {
+                        selectedLocationInfo
+                    }
+                    
+                    // Bouton de confirmation
+                    confirmButton
+                }
+            }
+            .navigationTitle("Lieu de rendez-vous")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Annuler") {
+                        dismiss()
+                    }
+                    .foregroundColor(.white)
+                }
+            }
+        }
+        .onAppear {
+            // Centrer sur la localisation actuelle ou celle existante
+            if let coord = selectedCoordinate {
+                tempCoordinate = coord
+                tempLocationName = selectedLocation
+                mapPosition = .camera(
+                    MapCamera(centerCoordinate: coord, distance: 1000)
+                )
+            }
+        }
+    }
+    
+    // MARK: - Search Bar
+    
+    private var searchBar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.white.opacity(0.6))
+                
+                TextField("Rechercher un lieu", text: $searchText)
+                    .foregroundColor(.white)
+                    .onChange(of: searchText) { _, newValue in
+                        if !newValue.isEmpty {
+                            isSearching = true
+                            performSearch(query: newValue)
+                        } else {
+                            isSearching = false
+                            searchResults = []
+                        }
+                    }
+                
+                if !searchText.isEmpty {
+                    Button {
+                        searchText = ""
+                        searchResults = []
+                        isSearching = false
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundColor(.white.opacity(0.6))
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            
+            // Bouton de géolocalisation
+            Button {
+                centerOnUserLocation()
+            } label: {
+                Image(systemName: "location.fill")
+                    .foregroundColor(.white)
+                    .padding(10)
+                    .background(.ultraThinMaterial)
+                    .clipShape(Circle())
+            }
+        }
+        .padding()
+    }
+    
+    // MARK: - Map View
+    
+    private var mapView: some View {
+        ZStack {
+            Map(position: $mapPosition) {
+                // Marqueur pour la position sélectionnée
+                if let coord = tempCoordinate {
+                    Annotation("Lieu de RDV", coordinate: coord) {
+                        VStack(spacing: 0) {
+                            Image(systemName: "mappin.circle.fill")
+                                .font(.title)
+                                .foregroundColor(.coralAccent)
+                            
+                            Image(systemName: "arrowtriangle.down.fill")
+                                .font(.caption)
+                                .foregroundColor(.coralAccent)
+                                .offset(y: -5)
+                        }
+                    }
+                }
+            }
+            .onTapGesture { coordinate in
+                handleMapTap(at: coordinate)
+            }
+            
+            // Résultats de recherche (overlay)
+            if isSearching && !searchResults.isEmpty {
+                VStack(spacing: 0) {
+                    searchResultsList
+                    Spacer()
+                }
+            }
+        }
+    }
+    
+    private var searchResultsList: some View {
+        ScrollView {
+            VStack(spacing: 1) {
+                ForEach(searchResults, id: \.self) { item in
+                    Button {
+                        selectSearchResult(item)
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.name ?? "Lieu inconnu")
+                                    .font(.subheadline.bold())
+                                    .foregroundColor(.white)
+                                
+                                if let address = item.placemark.title {
+                                    Text(address)
+                                        .font(.caption)
+                                        .foregroundColor(.white.opacity(0.7))
+                                }
+                            }
+                            
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.white.opacity(0.5))
+                        }
+                        .padding()
+                        .background(.ultraThinMaterial)
+                    }
+                }
+            }
+        }
+        .frame(maxHeight: 300)
+        .background(Color.darkNavy.opacity(0.95))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+        .padding(.top)
+    }
+    
+    // MARK: - Selected Location Info
+    
+    private var selectedLocationInfo: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "mappin.circle.fill")
+                .font(.title2)
+                .foregroundColor(.coralAccent)
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Lieu sélectionné")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+                
+                Text(tempLocationName)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white)
+                    .lineLimit(2)
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .padding(.horizontal)
+        .padding(.top)
+    }
+    
+    // MARK: - Confirm Button
+    
+    private var confirmButton: some View {
+        Button {
+            confirmSelection()
+        } label: {
+            HStack {
+                Image(systemName: "checkmark.circle.fill")
+                Text("Confirmer le lieu")
+                    .fontWeight(.semibold)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(
+                LinearGradient(
+                    colors: [.coralAccent, .pinkAccent],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .padding()
+        .disabled(tempCoordinate == nil)
+        .opacity(tempCoordinate == nil ? 0.5 : 1.0)
+    }
+    
+    // MARK: - Actions
+    
+    private func handleMapTap(at coordinate: CGPoint) {
+        // TODO: Convertir le point écran en coordonnées
+        // Pour l'instant, ce n'est pas directement supporté par SwiftUI Map
+        // On utilise plutôt la recherche ou le long press
+    }
+    
+    private func performSearch(query: String) {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        
+        let search = MKLocalSearch(request: request)
+        search.start { response, error in
+            if let response = response {
+                searchResults = response.mapItems
+            }
+        }
+    }
+    
+    private func selectSearchResult(_ item: MKMapItem) {
+        tempCoordinate = item.placemark.coordinate
+        tempLocationName = item.name ?? item.placemark.title ?? "Lieu sélectionné"
+        
+        // Centrer sur le lieu
+        mapPosition = .camera(
+            MapCamera(centerCoordinate: item.placemark.coordinate, distance: 500)
+        )
+        
+        // Fermer la recherche
+        isSearching = false
+        searchText = ""
+        searchResults = []
+    }
+    
+    private func centerOnUserLocation() {
+        // TODO: Demander la permission et centrer sur l'utilisateur
+        // Nécessite CLLocationManager
+        Logger.log("📍 Centrage sur la position utilisateur", category: .location)
+    }
+    
+    private func confirmSelection() {
+        guard let coord = tempCoordinate else { return }
+        
+        selectedCoordinate = coord
+        selectedLocation = tempLocationName
+        
+        dismiss()
+    }
+}
+
+// MARK: - Preview
+
+#Preview {
+    @Previewable @State var location: String = ""
+    @Previewable @State var coordinate: CLLocationCoordinate2D? = nil
+    
+    LocationPickerView(
+        selectedLocation: $location,
+        selectedCoordinate: $coordinate
+    )
+}

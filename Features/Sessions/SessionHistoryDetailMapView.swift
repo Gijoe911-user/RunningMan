@@ -1,5 +1,5 @@
 //
-//  SessionHistoryDetailView.swift
+//  SessionHistoryDetailMapView.swift
 //  RunningMan
 //
 //  Vue détaillée d'une session terminée avec carte et tracés de tous les participants

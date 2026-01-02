@@ -47,6 +47,11 @@ struct SessionModel: Identifiable, Codable, Hashable {
     var isJoinable: Bool?
     var maxParticipants: Int?
     
+    // 🆕 Gestion des états individuels des participants
+    /// État de chaque participant dans la session
+    /// Key: userId, Value: état du participant
+    var participantStates: [String: ParticipantSessionState]?
+    
     var createdAt: Date?
     var updatedAt: Date?
     
@@ -76,6 +81,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
         visibility: SessionVisibility? = .squad,
         isJoinable: Bool? = true,
         maxParticipants: Int? = nil,
+        participantStates: [String: ParticipantSessionState]? = nil,
         createdAt: Date? = nil,
         updatedAt: Date? = nil
     ) {
@@ -102,6 +108,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
         self.visibility = visibility
         self.isJoinable = isJoinable
         self.maxParticipants = maxParticipants
+        self.participantStates = participantStates
         self.createdAt = createdAt ?? Date()
         self.updatedAt = updatedAt ?? Date()
     }
@@ -112,6 +119,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
     
     // MARK: - Computed Properties (Logique métier)
     
+    var isScheduled: Bool { status == .scheduled }
     var isActive: Bool { status == .active }
     var isPaused: Bool { status == .paused }
     var isEnded: Bool { status == .ended }
@@ -134,6 +142,61 @@ struct SessionModel: Identifiable, Codable, Hashable {
         let seconds = Int((minutesPerKm - Double(minutes)) * 60)
         return String(format: "%d:%02d", minutes, seconds)
     }
+    
+    // MARK: - Participant States
+    
+    /// Nombre de participants actuellement actifs (en course)
+    var activeParticipantsCount: Int {
+        participantStates?.values.filter { $0.status == .active }.count ?? 0
+    }
+    
+    /// Nombre de participants en pause
+    var pausedParticipantsCount: Int {
+        participantStates?.values.filter { $0.status == .paused }.count ?? 0
+    }
+    
+    /// Nombre de participants ayant terminé
+    var finishedParticipantsCount: Int {
+        participantStates?.values.filter { $0.status == .ended }.count ?? 0
+    }
+    
+    /// Nombre de participants ayant abandonné
+    var abandonedParticipantsCount: Int {
+        participantStates?.values.filter { $0.status == .abandoned }.count ?? 0
+    }
+    
+    /// Nombre total de participants ayant terminé ou abandonné
+    var completedParticipantsCount: Int {
+        finishedParticipantsCount + abandonedParticipantsCount
+    }
+    
+    /// La session peut être terminée si tous les participants ont fini
+    var canBeEnded: Bool {
+        guard let states = participantStates, !states.isEmpty else {
+            // Si pas d'états, on peut terminer (compatibilité avec anciennes sessions)
+            return true
+        }
+        return states.values.allSatisfy { $0.hasFinished }
+    }
+    
+    /// Indique si la session a au moins un participant actif
+    var hasActiveParticipants: Bool {
+        activeParticipantsCount > 0
+    }
+    
+    /// État d'un participant spécifique
+    /// - Parameter userId: ID de l'utilisateur
+    /// - Returns: État du participant, ou nil s'il ne participe pas
+    func participantState(for userId: String) -> ParticipantSessionState? {
+        participantStates?[userId]
+    }
+    
+    /// Vérifie si un utilisateur est actuellement actif dans la session
+    /// - Parameter userId: ID de l'utilisateur
+    /// - Returns: true si l'utilisateur est en course
+    func isParticipantActive(_ userId: String) -> Bool {
+        participantStates?[userId]?.isCurrentlyActive ?? false
+    }
 
     // MARK: - Hashable Implementation
     static func == (lhs: SessionModel, rhs: SessionModel) -> Bool { lhs.id == rhs.id }
@@ -143,6 +206,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
 // MARK: - Enums
 
 enum SessionStatus: String, Codable {
+    case scheduled = "SCHEDULED"  // 🆕 Session créée mais pas encore démarrée
     case active = "ACTIVE"
     case paused = "PAUSED"
     case ended = "ENDED"

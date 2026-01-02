@@ -329,7 +329,7 @@ class TrackingManager: ObservableObject {
                 currentDistance += distance
                 
                 // Calculer la vitesse
-                currentSpeed = locationProvider.currentSpeed ?? 0
+                currentSpeed = locationProvider.currentSpeed
             }
         }
         
@@ -339,7 +339,7 @@ class TrackingManager: ObservableObject {
         if let sessionId = activeTrackingSession?.id,
            let userId = AuthService.shared.currentUserId {
             // Fire-and-forget pour ne pas bloquer
-            Task.detached {
+            Task.detached { @MainActor in
                 let repository = RealtimeLocationRepository()
                 try? await repository.publishLocation(
                     sessionId: sessionId,

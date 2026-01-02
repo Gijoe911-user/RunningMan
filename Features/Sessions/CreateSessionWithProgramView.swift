@@ -124,7 +124,7 @@ struct CreateSessionWithProgramView: View {
             }
             .sheet(isPresented: $showLocationPicker) {
                 LocationPickerView(
-                    locationName: $locationName,
+                    selectedLocation: $locationName,
                     selectedCoordinate: $selectedCoordinate
                 )
             }
@@ -227,7 +227,7 @@ struct CreateSessionWithProgramView: View {
     private var basicInfoStep: some View {
         VStack(spacing: 20) {
             // Header
-            StepHeader(
+            SessionStepHeader(
                 icon: "figure.run",
                 title: "Informations de base",
                 subtitle: "Définissez le type de session"
@@ -316,7 +316,7 @@ struct CreateSessionWithProgramView: View {
     
     private var locationStep: some View {
         VStack(spacing: 20) {
-            StepHeader(
+            SessionStepHeader(
                 icon: "mappin.circle.fill",
                 title: "Lieu de rendez-vous",
                 subtitle: "Où les coureurs vont-ils se retrouver ?"
@@ -384,7 +384,7 @@ struct CreateSessionWithProgramView: View {
     
     private var programStep: some View {
         VStack(spacing: 20) {
-            StepHeader(
+            SessionStepHeader(
                 icon: "doc.text.fill",
                 title: "Programme d'entraînement",
                 subtitle: "Optionnel - Définissez des objectifs"
@@ -468,7 +468,7 @@ struct CreateSessionWithProgramView: View {
     
     private var reviewStep: some View {
         VStack(spacing: 20) {
-            StepHeader(
+            SessionStepHeader(
                 icon: "checkmark.circle.fill",
                 title: "Récapitulatif",
                 subtitle: "Vérifiez les informations"
@@ -776,37 +776,6 @@ struct CreateSessionWithProgramView: View {
 
 // MARK: - Supporting Views
 
-struct StepHeader: View {
-    let icon: String
-    let title: String
-    let subtitle: String
-    
-    var body: some View {
-        VStack(spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: 50))
-                .foregroundStyle(
-                    LinearGradient(
-                        colors: [.coralAccent, .pinkAccent],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-            
-            Text(title)
-                .font(.title2.bold())
-                .foregroundColor(.white)
-            
-            Text(subtitle)
-                .font(.subheadline)
-                .foregroundColor(.white.opacity(0.7))
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity)
-        .padding()
-    }
-}
-
 struct ThemeCard: View {
     let theme: TrainingTheme
     let isSelected: Bool
@@ -983,22 +952,6 @@ struct ReviewRow: View {
 }
 
 // MARK: - Placeholder Views (à implémenter)
-
-struct LocationPickerView: View {
-    @Binding var locationName: String
-    @Binding var selectedCoordinate: CLLocationCoordinate2D?
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        Text("Location Picker - À implémenter")
-            .onTapGesture {
-                // Mock data
-                locationName = "Parc de la Tête d'Or"
-                selectedCoordinate = CLLocationCoordinate2D(latitude: 45.7769, longitude: 4.8569)
-                dismiss()
-            }
-    }
-}
 
 struct TrainingProgramPickerView: View {
     let squadId: String

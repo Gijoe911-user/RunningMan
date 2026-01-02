@@ -373,61 +373,6 @@ struct ActiveSessionCard: View {
     }
 }
 
-// MARK: - Compact Stat Badge
-
-struct StatBadgeCompact: View {
-    let icon: String
-    let value: String
-    let label: String
-    
-    var body: some View {
-        VStack(spacing: 2) {
-            Image(systemName: icon)
-                .font(.caption)
-                .foregroundColor(.coralAccent)
-            
-            Text(value)
-                .font(.caption.bold())
-                .foregroundColor(.white)
-            
-            Text(label)
-                .font(.caption2)
-                .foregroundColor(.white.opacity(0.7))
-        }
-        .frame(maxWidth: .infinity)
-    }
-}
-
-// MARK: - Session History Detail View (Placeholder)
-
-struct SessionHistoryDetailView: View {
-    let session: SessionModel
-    
-    var body: some View {
-        ZStack {
-            Color.darkNavy
-                .ignoresSafeArea()
-            
-            ScrollView {
-                VStack(spacing: 20) {
-                    Text("Détails de la session")
-                        .font(.title2.bold())
-                        .foregroundColor(.white)
-                    
-                    Text("Session du \(session.startedAt, style: .date)")
-                        .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.7))
-                    
-                    // TODO: Ajouter les détails complets, carte, tracé GPS, etc.
-                }
-                .padding()
-            }
-        }
-        .navigationTitle("Détails")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
 // MARK: - Preview
 
 #Preview {
