@@ -22,13 +22,9 @@ class RouteHistoryService {
         Logger.log("RouteHistoryService initialisé", category: .location)
     }
     
-    // MARK: - Save Route Point
+    // MARK: - Save Route Point (ancienne structure)
     
-    /// Enregistre un point GPS dans l'historique du parcours
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
-    ///   - location: Position GPS
+    /// Enregistre un point GPS dans l'historique du parcours (ancienne structure)
     func saveRoutePoint(
         sessionId: String,
         userId: String,
@@ -44,7 +40,6 @@ class RouteHistoryService {
             timestamp: location.timestamp
         )
         
-        // Chemin: sessions/{sessionId}/routes/{userId}/points/{timestamp}
         let pointRef = db.collection("sessions")
             .document(sessionId)
             .collection("routes")
@@ -53,22 +48,55 @@ class RouteHistoryService {
             .document("\(Int(location.timestamp.timeIntervalSince1970))")
         
         try pointRef.setData(from: point)
-        
-        // Logger.log("Point GPS enregistré: \(point.latitude), \(point.longitude)", category: .location)
     }
     
     // MARK: - Load Route Points
     
     /// Charge tous les points GPS d'un parcours
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
-    /// - Returns: Liste des points GPS ordonnés par timestamp
     func loadRoutePoints(
         sessionId: String,
         userId: String
     ) async throws -> [RoutePoint] {
         
+        // 1) Structure moderne /routes/{sessionId_userId}
+        let modernRouteRef = db.collection("routes")
+            .document("\(sessionId)_\(userId)")
+        
+        let modernDoc = try await modernRouteRef.getDocument()
+        
+        if modernDoc.exists, let data = modernDoc.data() {
+            let geoPoints = data["points"] as? [GeoPoint]
+            let timestamps = data["pointsTimestamps"] as? [Timestamp]
+            let version = (data["version"] as? Int) ?? 1
+            
+            if let geoPoints, let timestamps, timestamps.count == geoPoints.count {
+                // Lecture moderne fiable avec timestamps
+                var points: [RoutePoint] = []
+                points.reserveCapacity(geoPoints.count)
+                for i in 0..<geoPoints.count {
+                    let gp = geoPoints[i]
+                    let ts = timestamps[i].dateValue()
+                    points.append(RoutePoint(
+                        latitude: gp.latitude,
+                        longitude: gp.longitude,
+                        altitude: 0,
+                        speed: 0,
+                        horizontalAccuracy: 0,
+                        timestamp: ts
+                    ))
+                }
+                
+                // Filtrer doublons consécutifs
+                let filtered = filterConsecutiveDuplicates(points: points)
+                Logger.log("Points GPS chargés (moderne v\(version) + timestamps): \(filtered.count)", category: .location)
+                return filtered
+            } else if geoPoints != nil {
+                // Doc moderne présent mais incomplet => fallback
+                Logger.log("⚠️ Doc routes moderne incomplet (pas de pointsTimestamps) → fallback ancien", category: .location)
+            }
+        }
+        
+        // 2) Fallback: Ancienne structure /sessions/{sessionId}/routes/{userId}/points
         let pointsRef = db.collection("sessions")
             .document(sessionId)
             .collection("routes")
@@ -78,26 +106,18 @@ class RouteHistoryService {
         
         let snapshot = try await pointsRef.getDocuments()
         
-        let points = snapshot.documents.compactMap { doc -> RoutePoint? in
+        var points = snapshot.documents.compactMap { doc -> RoutePoint? in
             try? doc.data(as: RoutePoint.self)
         }
         
-        Logger.log("Points GPS chargés: \(points.count)", category: .location)
+        points = filterConsecutiveDuplicates(points: points)
         
+        Logger.log("Points GPS chargés (ancienne): \(points.count)", category: .location)
         return points
     }
     
-    // MARK: - Create/Update User Route
+    // MARK: - Create/Update User Route (ancienne structure)
     
-    /// Crée ou met à jour le parcours d'un utilisateur
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
-    ///   - distance: Distance parcourue (m)
-    ///   - duration: Durée (s)
-    ///   - averageSpeed: Vitesse moyenne (m/s)
-    ///   - maxSpeed: Vitesse max (m/s)
-    ///   - pointsCount: Nombre de points
     func updateUserRoute(
         sessionId: String,
         userId: String,
@@ -113,11 +133,9 @@ class RouteHistoryService {
             .collection("routes")
             .document(userId)
         
-        // Vérifier si le document existe déjà
         let routeDoc = try await routeRef.getDocument()
         
         if routeDoc.exists {
-            // Mettre à jour
             try await routeRef.updateData([
                 "totalDistance": distance,
                 "duration": duration,
@@ -127,7 +145,6 @@ class RouteHistoryService {
                 "updatedAt": FieldValue.serverTimestamp()
             ])
         } else {
-            // Créer
             let route = UserRoute(
                 sessionId: sessionId,
                 userId: userId,
@@ -145,12 +162,8 @@ class RouteHistoryService {
         Logger.log("Parcours mis à jour: \(distance)m, \(pointsCount) points", category: .location)
     }
     
-    // MARK: - End User Route
+    // MARK: - End User Route (ancienne structure)
     
-    /// Termine le parcours d'un utilisateur
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
     func endUserRoute(sessionId: String, userId: String) async throws {
         let routeRef = db.collection("sessions")
             .document(sessionId)
@@ -165,13 +178,8 @@ class RouteHistoryService {
         Logger.logSuccess("Parcours terminé", category: .location)
     }
     
-    // MARK: - Get User Route
+    // MARK: - Get User Route (ancienne structure)
     
-    /// Récupère le parcours d'un utilisateur
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
-    /// - Returns: Parcours de l'utilisateur
     func getUserRoute(
         sessionId: String,
         userId: String
@@ -189,11 +197,8 @@ class RouteHistoryService {
         return try doc.data(as: UserRoute.self)
     }
     
-    // MARK: - Get All Routes for Session
+    // MARK: - Get All Routes for Session (ancienne structure)
     
-    /// Récupère tous les parcours d'une session
-    /// - Parameter sessionId: ID de la session
-    /// - Returns: Liste des parcours
     func getAllRoutesForSession(sessionId: String) async throws -> [UserRoute] {
         let routesRef = db.collection("sessions")
             .document(sessionId)
@@ -208,30 +213,15 @@ class RouteHistoryService {
         return routes
     }
     
-    // MARK: - Get User's All Routes
+    // MARK: - Get User's All Routes (non implémenté)
     
-    /// Récupère tous les parcours d'un utilisateur (toutes sessions)
-    /// - Parameter userId: ID de l'utilisateur
-    /// - Returns: Liste des parcours
     func getAllRoutesForUser(userId: String) async throws -> [UserRoute] {
-        // Note: Cette requête nécessite un index composite dans Firestore
-        // Pour l'instant, on charge session par session
-        
-        // Alternative: Créer une collection globale "routes" avec userId comme champ
-        // routes/{routeId} { sessionId, userId, ... }
-        
-        // Pour simplifier, retournons un tableau vide pour l'instant
-        // L'implémentation complète nécessiterait une restructuration
-        
         Logger.log("⚠️ getAllRoutesForUser() nécessite une implémentation complète", category: .location)
         return []
     }
     
     // MARK: - Calculate Route Statistics
     
-    /// Calcule les statistiques d'un parcours à partir des points
-    /// - Parameter points: Liste des points GPS
-    /// - Returns: Statistiques calculées
     func calculateRouteStatistics(points: [RoutePoint]) -> (distance: Double, duration: TimeInterval, avgSpeed: Double, maxSpeed: Double) {
         guard points.count > 1 else {
             return (0, 0, 0, 0)
@@ -246,7 +236,6 @@ class RouteHistoryService {
             let previousPoint = points[i-1]
             let currentPoint = points[i]
             
-            // Calculer la distance entre les deux points
             let previousLocation = previousPoint.location
             let currentLocation = currentPoint.location
             
@@ -257,14 +246,10 @@ class RouteHistoryService {
                 totalDistance += distance
             }
             
-            // Vitesse
             if let speed = currentPoint.speed, speed >= 0 {
                 speedSum += speed
                 validSpeedCount += 1
-                
-                if speed > maxSpeed {
-                    maxSpeed = speed
-                }
+                if speed > maxSpeed { maxSpeed = speed }
             }
         }
         
@@ -274,13 +259,8 @@ class RouteHistoryService {
         return (totalDistance, duration, avgSpeed, maxSpeed)
     }
     
-    // MARK: - Stream Route Points
+    // MARK: - Stream Route Points (ancienne structure)
     
-    /// Observe les points GPS d'un parcours en temps réel
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
-    /// - Returns: Stream de points GPS
     func streamRoutePoints(
         sessionId: String,
         userId: String
@@ -306,9 +286,10 @@ class RouteHistoryService {
                     return
                 }
                 
-                let points = documents.compactMap { doc -> RoutePoint? in
+                var points = documents.compactMap { doc -> RoutePoint? in
                     try? doc.data(as: RoutePoint.self)
                 }
+                points = self.filterConsecutiveDuplicates(points: points)
                 
                 continuation.yield(points)
             }
@@ -319,12 +300,8 @@ class RouteHistoryService {
         }
     }
     
-    // MARK: - Delete Route
+    // MARK: - Delete Route (ancienne structure)
     
-    /// Supprime un parcours et tous ses points
-    /// - Parameters:
-    ///   - sessionId: ID de la session
-    ///   - userId: ID de l'utilisateur
     func deleteRoute(sessionId: String, userId: String) async throws {
         let routeRef = db.collection("sessions")
             .document(sessionId)
@@ -335,17 +312,37 @@ class RouteHistoryService {
         let pointsRef = routeRef.collection("points")
         let snapshot = try await pointsRef.getDocuments()
         
-        // Batch delete
         let batch = db.batch()
         for doc in snapshot.documents {
             batch.deleteDocument(doc.reference)
         }
-        
-        // Supprimer le document route lui-même
         batch.deleteDocument(routeRef)
         
         try await batch.commit()
         
         Logger.logSuccess("Parcours supprimé", category: .location)
     }
+    
+    // MARK: - Helpers
+    
+    /// Filtre les doublons consécutifs exacts (même lat/lon)
+    private func filterConsecutiveDuplicates(points: [RoutePoint]) -> [RoutePoint] {
+        guard !points.isEmpty else { return [] }
+        var filtered: [RoutePoint] = []
+        filtered.reserveCapacity(points.count)
+        
+        var lastLat: Double?
+        var lastLon: Double?
+        
+        for p in points {
+            if let ll = lastLat, let lo = lastLon, abs(p.latitude - ll) < .ulpOfOne, abs(p.longitude - lo) < .ulpOfOne {
+                continue
+            }
+            filtered.append(p)
+            lastLat = p.latitude
+            lastLon = p.longitude
+        }
+        return filtered
+    }
 }
+

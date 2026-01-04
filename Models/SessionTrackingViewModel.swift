@@ -4,7 +4,7 @@
 //
 //  ViewModel consolidé pour gérer le cycle de vie des sessions
 //  🎯 Gère le tracking individuel, le support multi-sessions et l'historique
-//
+// 3.1.2026
 
 import Foundation
 import CoreLocation
@@ -13,183 +13,144 @@ import Combine
 @MainActor
 class SessionTrackingViewModel: ObservableObject {
     
-    // MARK: - Published Properties
+    // MARK: - Published Properties (Observées par la Vue)
     
-    /// Session active de l'utilisateur (Tracking GPS en cours)
+    // État du tracking (lié au Manager)
+    @Published var trackingState: TrackingState = .idle
+    @Published var trackingDistance: Double = 0
+    @Published var trackingDuration: TimeInterval = 0
+    @Published var trackingSpeed: Double = 0
+    
+    // Données des sessions (liées au Service)
     @Published var myActiveTrackingSession: SessionModel?
-    
-    /// Sessions suivies en tant que spectateur
-    @Published var supporterSessions: [SessionModel] = []
-    
-    /// Flux global des sessions actives dans les squads de l'utilisateur
     @Published var allActiveSessions: [SessionModel] = []
-    
-    /// NOUVEAU : Historique récent (issu de la V1) pour affichage global
-    @Published var recentHistory: [SessionModel] = []
+    @Published var supporterSessions: [SessionModel] = []
+    @Published var recentHistory: [SessionModel] = [] // 🆕 Pour AllSessionsViewUnified
     
     @Published var isLoading = false
     @Published var errorMessage: String?
     
-    // Stats de tracking temps réel liées au TrackingManager
-    @Published var trackingDistance: Double = 0
-    @Published var trackingDuration: TimeInterval = 0
-    @Published var trackingSpeed: Double = 0
-    @Published var trackingState: TrackingState = .idle
+    // 🆕 Propriété calculée pour vérifier si on peut démarrer
+    var canStartTracking: Bool {
+        trackingState == .idle
+    }
     
-    // MARK: - Services
+    // MARK: - Dependencies
     
     private let trackingManager = TrackingManager.shared
     private let sessionService = SessionService.shared
     private let authService = AuthService.shared
-    
     private var cancellables = Set<AnyCancellable>()
-    
-    // MARK: - Computed Properties
-    
-    var canStartTracking: Bool { trackingManager.canStartTracking }
-    private var currentUserId: String? { authService.currentUserId }
     
     // MARK: - Initialization
     
     init() {
-        Logger.log("📱 SessionTrackingViewModel initialisé avec support Historique", category: .session)
-        bindTrackingManager()
+        setupSubscribers()
+        refreshData()
     }
     
-    // MARK: - Bindings (Flux réactifs)
+    // MARK: - Setup (Le "Pont" entre le Manager et l'UI)
     
-    private func bindTrackingManager() {
-        // Synchronisation des stats et de l'état depuis le Manager unique
-        Task {
-            for await session in trackingManager.$activeTrackingSession.values {
-                self.myActiveTrackingSession = session
-            }
-        }
+    private func setupSubscribers() {
+        // On écoute le TrackingManager et on répercute les changements sur l'UI
+        trackingManager.$trackingState
+            .assign(to: &$trackingState)
         
-        Task {
-            for await state in trackingManager.$trackingState.values {
-                self.trackingState = state
-            }
-        }
+        trackingManager.$currentDistance
+            .assign(to: &$trackingDistance)
         
-        Task {
-            for await distance in trackingManager.$currentDistance.values {
-                self.trackingDistance = distance
-            }
-        }
+        trackingManager.$currentDuration
+            .assign(to: &$trackingDuration)
         
-        Task {
-            for await duration in trackingManager.$currentDuration.values {
-                self.trackingDuration = duration
-            }
-        }
-    }
-    
-    // MARK: - Core Logic (Load Data)
-    
-    /// Charge les sessions actives ET l'historique de manière asynchrone parallélisée
-    func loadAllActiveSessions(squadIds: [String]) async {
-        guard let userId = currentUserId else {
-            errorMessage = "Utilisateur non connecté"
-            return
-        }
-        
-        isLoading = true
-        errorMessage = nil
-        
-        // Utilisation d'un TaskGroup pour ne pas bloquer l'UI et charger plus vite
-        await withTaskGroup(of: Void.self) { group in
+        trackingManager.$currentSpeed
+            .assign(to: &$trackingSpeed)
             
-            // Task 1 : Récupération des sessions LIVE (V2)
-            group.addTask {
-                var allSessions: [SessionModel] = []
-                for squadId in squadIds {
-                    if let sessions = try? await self.sessionService.getActiveSessions(squadId: squadId) {
-                        allSessions.append(contentsOf: sessions)
-                    }
-                }
+        trackingManager.$activeTrackingSession
+            .assign(to: &$myActiveTrackingSession)
+    }
+    
+    // MARK: - Actions de Session
+    
+    /// Rafraîchit la liste des sessions disponibles dans les squads
+    func refreshData() {
+        Logger.log("[AUDIT-STVM-01] 🔄 SessionTrackingViewModel.refreshData appelé", category: .service)
+        guard let userId = authService.currentUserId else { return }
+        isLoading = true
+        
+        Task {
+            do {
+                // On récupère toutes les sessions actives via le service
+                let sessions = try await sessionService.getAllActiveSessions(userId: userId)
                 
-                let sessions = allSessions
                 await MainActor.run {
                     self.allActiveSessions = sessions
-                    self.updateSupporterList(allSessions: sessions, userId: userId)
-                }
-            }
-            
-            // Task 2 : Récupération de l'HISTORIQUE (V1 intégrée)
-            group.addTask {
-                var history: [SessionModel] = []
-                for squadId in squadIds {
-                    if let squadHistory = try? await self.sessionService.getSessionHistory(squadId: squadId, limit: 5) {
-                        history.append(contentsOf: squadHistory)
+                    // On filtre celles où on est supporter mais pas le créateur/runner actif
+                    self.supporterSessions = sessions.filter {
+                        $0.participants.contains(userId) && $0.id != myActiveTrackingSession?.id
                     }
+                    self.isLoading = false
                 }
-                let sortedHistory = history.sorted { ($0.endedAt ?? Date()) > ($1.endedAt ?? Date()) }
-                await MainActor.run { self.recentHistory = sortedHistory }
+            } catch {
+                self.errorMessage = "Erreur de chargement des sessions"
+                self.isLoading = false
             }
-        }
-        
-        isLoading = false
-    }
-    
-    private func updateSupporterList(allSessions: [SessionModel], userId: String) {
-        if let trackingId = trackingManager.activeTrackingSession?.id {
-            self.supporterSessions = allSessions.filter {
-                $0.id != trackingId && $0.participants.contains(userId)
-            }
-        } else {
-            self.supporterSessions = allSessions.filter { $0.participants.contains(userId) }
         }
     }
     
-    // MARK: - Actions (Tracking & Support)
+    /// 🆕 Alias pour AllSessionsViewUnified
+    func loadAllActiveSessions() {
+        Logger.log("[AUDIT-STVM-02] 📋 SessionTrackingViewModel.loadAllActiveSessions appelé", category: .service)
+        refreshData()
+    }
     
+    /// Démarre le tracking pour une session donnée
     func startTracking(for session: SessionModel) async -> Bool {
-        guard canStartTracking else {
-            errorMessage = "Un tracking est déjà en cours"
+        guard trackingState == .idle else {
+            self.errorMessage = "Un tracking est déjà en cours"
             return false
         }
         
-        let success = await trackingManager.startTracking(for: session)
-        if success {
-            self.myActiveTrackingSession = session
-        }
-        return success
+        return await trackingManager.startTracking(for: session)
     }
     
-    func stopTracking() async -> Bool {
+    /// Arrête le tracking
+    func stopTracking() async {
         do {
             try await trackingManager.stopTracking()
-            self.myActiveTrackingSession = nil
-            // Ici, on pourrait déclencher un rafraîchissement de la Gamification (Indice de consistance)
-            return true
+            refreshData()
         } catch {
-            errorMessage = error.localizedDescription
-            return false
+            self.errorMessage = error.localizedDescription
         }
     }
     
-    func joinSessionAsSupporter(sessionId: String) async -> Bool {
-        guard let userId = currentUserId else { return false }
+    /// Rejoindre en tant que simple supporter
+    func joinAsSupporter(sessionId: String) async {
+        Logger.log("[AUDIT-STVM-03] 🤝 SessionTrackingViewModel.joinAsSupporter appelé - sessionId: \(sessionId)", category: .service)
+        guard let userId = authService.currentUserId else { return }
         do {
             try await sessionService.joinSession(sessionId: sessionId, userId: userId)
-            return true
+            refreshData()
         } catch {
-            errorMessage = "Impossible de rejoindre"
-            return false
+            self.errorMessage = "Impossible de rejoindre la session"
         }
+    }
+    
+    /// 🆕 Alias pour AllSessionsViewUnified
+    func joinSessionAsSupporter(sessionId: String) async {
+        Logger.log("[AUDIT-STVM-04] 🤝 SessionTrackingViewModel.joinSessionAsSupporter (alias) appelé", category: .service)
+        await joinAsSupporter(sessionId: sessionId)
     }
     
     // MARK: - Formatters
     
-    func formattedDistance(_ meters: Double) -> String {
-        String(format: "%.2f km", meters / 1000)
+    var formattedDistance: String {
+        String(format: "%.2f km", trackingDistance / 1000)
     }
     
-    func formattedDuration(_ seconds: TimeInterval) -> String {
-        let h = Int(seconds) / 3600
-        let m = (Int(seconds) % 3600) / 60
-        let s = Int(seconds) % 60
+    var formattedDuration: String {
+        let h = Int(trackingDuration) / 3600
+        let m = (Int(trackingDuration) % 3600) / 60
+        let s = Int(trackingDuration) % 60
         return h > 0 ? String(format: "%02d:%02d:%02d", h, m, s) : String(format: "%02d:%02d", m, s)
     }
 }

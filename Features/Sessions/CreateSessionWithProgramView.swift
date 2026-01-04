@@ -226,12 +226,29 @@ struct CreateSessionWithProgramView: View {
     
     private var basicInfoStep: some View {
         VStack(spacing: 20) {
-            // Header
-            SessionStepHeader(
-                icon: "figure.run",
-                title: "Informations de base",
-                subtitle: "Définissez le type de session"
-            )
+            // Header (remplace SessionStepHeader)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.coralAccent.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "figure.run")
+                        .font(.headline)
+                        .foregroundColor(.coralAccent)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Informations de base")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Définissez le type de session")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             
             // Session title
             VStack(alignment: .leading, spacing: 8) {
@@ -280,7 +297,7 @@ struct CreateSessionWithProgramView: View {
                         .font(.subheadline.bold())
                         .foregroundColor(.white)
                     
-                    Text(activeRaceSession != nil 
+                    Text(activeRaceSession != nil
                          ? "Une course est déjà active - Vous pourrez la rejoindre"
                          : "Une seule session de course peut être active à la fois")
                         .font(.caption)
@@ -316,11 +333,29 @@ struct CreateSessionWithProgramView: View {
     
     private var locationStep: some View {
         VStack(spacing: 20) {
-            SessionStepHeader(
-                icon: "mappin.circle.fill",
-                title: "Lieu de rendez-vous",
-                subtitle: "Où les coureurs vont-ils se retrouver ?"
-            )
+            // Header (remplace SessionStepHeader)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.coralAccent.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "mappin.circle.fill")
+                        .font(.headline)
+                        .foregroundColor(.coralAccent)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Lieu de rendez-vous")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Où les coureurs vont-ils se retrouver ?")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             
             // Toggle location
             Toggle(isOn: $hasLocation) {
@@ -384,11 +419,29 @@ struct CreateSessionWithProgramView: View {
     
     private var programStep: some View {
         VStack(spacing: 20) {
-            SessionStepHeader(
-                icon: "doc.text.fill",
-                title: "Programme d'entraînement",
-                subtitle: "Optionnel - Définissez des objectifs"
-            )
+            // Header (remplace SessionStepHeader)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.coralAccent.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "doc.text.fill")
+                        .font(.headline)
+                        .foregroundColor(.coralAccent)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Programme d'entraînement")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Optionnel - Définissez des objectifs")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             
             // Toggle program
             Toggle(isOn: $hasProgram) {
@@ -468,11 +521,29 @@ struct CreateSessionWithProgramView: View {
     
     private var reviewStep: some View {
         VStack(spacing: 20) {
-            SessionStepHeader(
-                icon: "checkmark.circle.fill",
-                title: "Récapitulatif",
-                subtitle: "Vérifiez les informations"
-            )
+            // Header (remplace SessionStepHeader)
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.coralAccent.opacity(0.2))
+                        .frame(width: 40, height: 40)
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.headline)
+                        .foregroundColor(.coralAccent)
+                }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Récapitulatif")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    Text("Vérifiez les informations")
+                        .font(.caption)
+                        .foregroundColor(.white.opacity(0.7))
+                }
+                Spacer()
+            }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
             
             VStack(spacing: 16) {
                 // Title

@@ -13,9 +13,14 @@ import SwiftUI
 /// - Titre et type de session
 /// - Stats rapides (coureurs, objectif, temps)
 /// - Liste compacte des coureurs actifs
-/// - Bouton "Terminer la session"
+/// - **Contrôles de tracking (Play/Pause/Stop)** via `SessionTrackingControlsView`
 ///
 /// **Position :** Bas de l'écran, au-dessus de la carte
+///
+/// **Architecture :**
+/// - Utilise `SessionsViewModel` pour les données de session et coureurs
+/// - Utilise `TrackingManager` pour les contrôles de tracking
+/// - Synchronise les deux systèmes lors de l'arrêt
 ///
 /// **Usage :**
 /// ```swift
@@ -24,7 +29,7 @@ import SwiftUI
 /// }
 /// ```
 ///
-/// - SeeAlso: `SessionsListView`, `SessionsViewModel`
+/// - SeeAlso: `SessionsListView`, `SessionsViewModel`, `TrackingManager`, `SessionTrackingControlsView`
 struct SessionActiveOverlay: View {
     
     // MARK: - Properties
@@ -35,7 +40,15 @@ struct SessionActiveOverlay: View {
     /// ViewModel pour accéder aux données en temps réel
     @ObservedObject var viewModel: SessionsViewModel
     
+    // MARK: - Tracking Manager
+    
+    /// Manager de tracking pour les contrôles Play/Pause/Stop
+    @ObservedObject private var trackingManager = TrackingManager.shared
+    
     // MARK: - State
+    
+    /// État local du tracking
+    @State private var currentTrackingState: TrackingState = .idle
     
     /// Affiche la confirmation avant de terminer la session
     @State private var showEndConfirmation = false
@@ -63,7 +76,7 @@ struct SessionActiveOverlay: View {
             Button("Annuler", role: .cancel) { }
             Button("Terminer", role: .destructive) {
                 Task {
-                    await endSession()
+                    await stopTrackingAndEndSession()
                 }
             }
         } message: {
@@ -75,6 +88,20 @@ struct SessionActiveOverlay: View {
             if let error = errorMessage {
                 Text(error)
             }
+        }
+        .onAppear {
+            // Synchroniser l'état au démarrage
+            currentTrackingState = trackingManager.trackingState
+            
+            // Démarrer automatiquement le tracking si pas encore fait
+            if trackingManager.trackingState == .idle {
+                Task {
+                    _ = await trackingManager.startTracking(for: session)
+                }
+            }
+        }
+        .onChange(of: trackingManager.trackingState) { _, newState in
+            currentTrackingState = newState
         }
     }
     
@@ -92,7 +119,7 @@ struct SessionActiveOverlay: View {
             // Titre de la session
             sessionHeader
             
-            // Stats rapides
+            // Stats rapides (remplacé par StatBadgeCompact)
             quickStats
             
             // Liste des coureurs
@@ -100,8 +127,8 @@ struct SessionActiveOverlay: View {
                 activaRunnersList
             }
             
-            // Bouton terminer
-            endSessionButton
+            // Contrôles de tracking (Play/Pause/Stop)
+            trackingControls
         }
         .padding()
     }
@@ -119,24 +146,24 @@ struct SessionActiveOverlay: View {
         }
     }
     
-    /// Stats rapides (coureurs, objectif, temps)
+    /// Stats rapides (coureurs, objectif, temps) -> StatBadgeCompact
     private var quickStats: some View {
         HStack(spacing: 20) {
-            StatBadge(
+            StatBadgeCompact(
                 icon: "figure.run",
                 value: "\(viewModel.activeRunners.count)",
                 label: "Coureurs"
             )
             
             if let distance = session.targetDistanceMeters {
-                StatBadge(
+                StatBadgeCompact(
                     icon: "location.fill",
                     value: String(format: "%.1f km", distance / 1000),
                     label: "Objectif"
                 )
             }
             
-            StatBadge(
+            StatBadgeCompact(
                 icon: "clock.fill",
                 value: timeElapsed,
                 label: "Temps"
@@ -155,7 +182,46 @@ struct SessionActiveOverlay: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 12) {
                     ForEach(viewModel.activeRunners.prefix(5)) { runner in
-                        RunnerCompactCard(runner: runner)
+                        // RunnerCompactCard inline
+                        VStack(spacing: 6) {
+                            // Avatar
+                            if let photoURL = runner.photoURL, let url = URL(string: photoURL) {
+                                AsyncImage(url: url) { image in
+                                    image
+                                        .resizable()
+                                        .scaledToFill()
+                                } placeholder: {
+                                    Circle()
+                                        .fill(Color.coralAccent.opacity(0.3))
+                                        .overlay {
+                                            Image(systemName: "person.fill")
+                                                .foregroundColor(.coralAccent)
+                                                .font(.caption)
+                                        }
+                                }
+                                .frame(width: 44, height: 44)
+                                .clipShape(Circle())
+                            } else {
+                                Circle()
+                                    .fill(Color.coralAccent.opacity(0.3))
+                                    .frame(width: 44, height: 44)
+                                    .overlay {
+                                        Image(systemName: "person.fill")
+                                            .foregroundColor(.coralAccent)
+                                            .font(.caption)
+                                    }
+                            }
+                            
+                            // Nom
+                            Text(runner.displayName)
+                                .font(.caption2)
+                                .foregroundColor(.white)
+                                .lineLimit(1)
+                                .frame(maxWidth: 60)
+                        }
+                        .padding(8)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
                     }
                     
                     if viewModel.activeRunners.count > 5 {
@@ -171,8 +237,29 @@ struct SessionActiveOverlay: View {
         }
     }
     
-    /// Bouton pour terminer la session
-    private var endSessionButton: some View {
+    /// Contrôles de tracking (Play/Pause/Stop)
+    private var trackingControls: some View {
+        SessionTrackingControlsView(
+            session: session,
+            trackingState: $currentTrackingState,
+            onStart: {
+                _ = await trackingManager.startTracking(for: session)
+            },
+            onPause: {
+                await trackingManager.pauseTracking()
+            },
+            onResume: {
+                await trackingManager.resumeTracking()
+            },
+            onStop: {
+                // Arrêter le tracking ET la session
+                await stopTrackingAndEndSession()
+            }
+        )
+    }
+    
+    /// Bouton pour terminer la session (ANCIEN - GARDÉ EN COMMENTAIRE)
+    private var endSessionButton_OLD: some View {
         Button {
             if !isEnding {
                 showEndConfirmation = true
@@ -210,8 +297,42 @@ struct SessionActiveOverlay: View {
     
     // MARK: - Actions
     
-    /// Termine la session active
-    private func endSession() async {
+    /// Arrête le tracking TrackingManager ET termine la session dans SessionsViewModel
+    private func stopTrackingAndEndSession() async {
+        Logger.log("🔴 stopTrackingAndEndSession() appelé", category: .session)
+        
+        guard !isEnding else {
+            Logger.log("⚠️ Déjà en cours de terminaison, ignoré", category: .session)
+            return
+        }
+        
+        isEnding = true
+        errorMessage = nil
+        
+        do {
+            // 1. Arrêter le tracking dans TrackingManager
+            Logger.log("🛑 Arrêt du TrackingManager...", category: .session)
+            try await trackingManager.stopTracking()
+            Logger.log("✅ TrackingManager arrêté", category: .session)
+            
+            // 2. Attendre un peu que tout se finalise
+            try? await Task.sleep(nanoseconds: 500_000_000) // 0.5 secondes
+            
+            // 3. Terminer la session dans SessionsViewModel
+            Logger.log("🛑 Terminaison de la session via SessionsViewModel...", category: .session)
+            try await viewModel.endSession()
+            Logger.log("✅ Session terminée", category: .session)
+            
+            isEnding = false
+        } catch {
+            Logger.logError(error, context: "stopTrackingAndEndSession", category: .session)
+            errorMessage = error.localizedDescription
+            isEnding = false
+        }
+    }
+    
+    /// Termine la session active (ANCIEN - utilise seulement SessionsViewModel)
+    private func endSession_OLD() async {
         Logger.log("🔴 endSession() appelé - isEnding: \(isEnding)", category: .session)
         
         guard !isEnding else {
@@ -235,6 +356,8 @@ struct SessionActiveOverlay: View {
         }
     }
 }
+
+// MARK: - StatBadgeCompact is now imported from SessionCardComponents.swift
 
 // MARK: - Preview
 

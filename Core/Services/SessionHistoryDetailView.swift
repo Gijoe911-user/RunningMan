@@ -87,7 +87,7 @@ struct SessionHistoryDetailView: View {
         }
     }
     
-    // MARK: - Header Section
+    // MARK: - Header Section (Inline)
     
     private var headerSection: some View {
         VStack(spacing: 16) {
@@ -103,39 +103,39 @@ struct SessionHistoryDetailView: View {
                     .foregroundColor(.white.opacity(0.7))
             }
             
-            // Stats principales
+            // Stats principales (remplace SessionStatCard)
             HStack(spacing: 20) {
-                SessionStatCard(
+                InlineStatCardBig(
                     icon: "figure.run",
                     value: String(format: "%.2f km", session.distanceInKilometers),
                     label: "Distance",
-                    color: Color.coralAccent
+                    color: .coralAccent
                 )
                 
-                SessionStatCard(
+                InlineStatCardBig(
                     icon: "clock.fill",
                     value: session.formattedDuration,
                     label: "Durée",
-                    color: Color.blue
+                    color: .blueAccent
                 )
                 
-                SessionStatCard(
+                InlineStatCardBig(
                     icon: "person.3.fill",
                     value: "\(session.participants.count)",
                     label: "Coureurs",
-                    color: Color.green
+                    color: .greenAccent
                 )
             }
             
-            // Stats secondaires
+            // Stats secondaires (remplace SessionSecondaryStatRow)
             HStack(spacing: 20) {
-                SessionSecondaryStatRow(
+                InlineSecondaryStat(
                     icon: "speedometer",
                     label: "Vitesse moy.",
                     value: String(format: "%.1f km/h", session.averageSpeedKmh)
                 )
                 
-                SessionSecondaryStatRow(
+                InlineSecondaryStat(
                     icon: "flame.fill",
                     label: "Allure",
                     value: session.averagePaceMinPerKm
@@ -179,62 +179,76 @@ struct SessionHistoryDetailView: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
     
-    // MARK: - Overview Section
+    // MARK: - Overview Section (Inline remplacements)
     
     private var overviewSection: some View {
         VStack(spacing: 16) {
-            // Session info
-            SessionInfoCard(
-                title: "Informations",
-                items: [
-                    ("Type", session.activityType.displayName),
-                    ("Statut", session.status.rawValue),
-                    ("Début", formatTime(session.startedAt)),
-                    ("Fin", session.endedAt != nil ? formatTime(session.endedAt!) : "En cours")
-                ]
-            )
-            
-            // Podium (si plusieurs participants)
-            if session.participants.count > 1 {
-                podiumSection
-            }
-            
-            // Notes (si présentes)
-            if let notes = session.notes, !notes.isEmpty {
-                SessionNotesCard(notes: notes)
-            }
-        }
-    }
-    
-    private var podiumSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("🏆 Classement")
-                .font(.headline)
-                .foregroundColor(.white)
-            
-            if viewModel.participantStats.isEmpty {
-                SessionEmptyStateView(
-                    icon: "trophy.fill",
-                    message: "Chargement du classement..."
-                )
-            } else {
+            // Session info (remplace SessionInfoCard)
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Informations")
+                    .font(.headline)
+                    .foregroundColor(.white)
+                
                 VStack(spacing: 8) {
-                    ForEach(Array(viewModel.rankedParticipants.enumerated()), id: \.element.userId) { index, stat in
-                        SessionPodiumRow(
-                            rank: index + 1,
-                            participantStat: stat,
-                            userName: viewModel.getUserName(for: stat.userId)
-                        )
-                    }
+                    infoRow(label: "Type", value: session.activityType.displayName)
+                    infoRow(label: "Statut", value: session.status.rawValue)
+                    infoRow(label: "Début", value: formatTime(session.startedAt))
+                    infoRow(label: "Fin", value: session.endedAt != nil ? formatTime(session.endedAt!) : "En cours")
                 }
             }
+            .padding()
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            
+            // Podium (remplace SessionPodiumRow + SessionEmptyStateView)
+            if session.participants.count > 1 {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("🏆 Classement")
+                        .font(.headline)
+                        .foregroundColor(.white)
+                    
+                    if viewModel.participantStats.isEmpty {
+                        emptyStateView(icon: "trophy.fill", message: "Chargement du classement...")
+                    } else {
+                        VStack(spacing: 8) {
+                            ForEach(Array(viewModel.rankedParticipants.enumerated()), id: \.element.userId) { index, stat in
+                                podiumRow(rank: index + 1,
+                                          name: viewModel.getUserName(for: stat.userId),
+                                          distanceMeters: stat.distance,
+                                          averageSpeed: stat.averageSpeed)
+                            }
+                        }
+                    }
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+            
+            // Notes (remplace SessionNotesCard)
+            if let notes = session.notes, !notes.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "note.text")
+                            .foregroundColor(.coralAccent)
+                        Text("Notes")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                    }
+                    
+                    Text(notes)
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
         }
-        .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
     
-    // MARK: - Participants Section
+    // MARK: - Participants Section (Inline)
     
     private var participantsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -243,17 +257,16 @@ struct SessionHistoryDetailView: View {
                 .foregroundColor(.white)
             
             if viewModel.participantStats.isEmpty {
-                SessionEmptyStateView(
-                    icon: "person.3.fill",
-                    message: "Chargement des participants..."
-                )
+                emptyStateView(icon: "person.3.fill", message: "Chargement des participants...")
             } else {
                 VStack(spacing: 12) {
                     ForEach(viewModel.participantStats, id: \.userId) { stat in
-                        SessionParticipantDetailCard(
-                            participantStat: stat,
-                            userName: viewModel.getUserName(for: stat.userId),
-                            participantState: session.participantState(for: stat.userId)
+                        participantDetailCard(
+                            name: viewModel.getUserName(for: stat.userId),
+                            distance: stat.distance,
+                            duration: stat.duration,
+                            avgSpeed: stat.averageSpeed,
+                            state: session.participantState(for: stat.userId)
                         )
                     }
                 }
@@ -261,7 +274,7 @@ struct SessionHistoryDetailView: View {
         }
     }
     
-    // MARK: - Map Section
+    // MARK: - Map Section (Inline)
     
     private var mapSection: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -270,7 +283,7 @@ struct SessionHistoryDetailView: View {
                 .foregroundColor(.white)
             
             if viewModel.routePoints.isEmpty {
-                SessionEmptyStateView(
+                emptyStateView(
                     icon: "map.fill",
                     message: "Aucun parcours enregistré",
                     subtitle: "Le tracking GPS n'était pas actif pendant cette session"
@@ -308,20 +321,16 @@ struct SessionHistoryDetailView: View {
                     .frame(height: 300)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     
-                    // Stats du parcours
+                    // Stats du parcours (remplace SessionMapStatItem)
                     HStack(spacing: 20) {
-                        SessionMapStatItem(
-                            icon: "point.topleft.down.curvedto.point.bottomright.up.fill",
-                            label: "Points GPS",
-                            value: "\(viewModel.routePoints.count)"
-                        )
+                        mapStatItem(icon: "point.topleft.down.curvedto.point.bottomright.up.fill",
+                                    label: "Points GPS",
+                                    value: "\(viewModel.routePoints.count)")
                         
                         if let elevationGain = viewModel.elevationGain {
-                            SessionMapStatItem(
-                                icon: "arrow.up.right",
-                                label: "Dénivelé +",
-                                value: String(format: "%.0f m", elevationGain)
-                            )
+                            mapStatItem(icon: "arrow.up.right",
+                                        label: "Dénivelé +",
+                                        value: String(format: "%.0f m", elevationGain))
                         }
                     }
                     .padding()
@@ -330,6 +339,141 @@ struct SessionHistoryDetailView: View {
                 }
             }
         }
+    }
+    
+    // MARK: - Inline Subviews
+    
+    private func infoRow(label: String, value: String) -> some View {
+        HStack {
+            Text(label)
+                .font(.subheadline)
+                .foregroundColor(.white.opacity(0.7))
+            Spacer()
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(.white)
+        }
+        .padding(.vertical, 4)
+    }
+    
+    private func emptyStateView(icon: String, message: String, subtitle: String? = nil) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title)
+                .foregroundColor(.coralAccent)
+            Text(message)
+                .font(.subheadline.bold())
+                .foregroundColor(.white)
+            if let subtitle = subtitle {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.7))
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    private func podiumRow(rank: Int, name: String, distanceMeters: Double, averageSpeed: Double) -> some View {
+        HStack(spacing: 12) {
+            Text("#\(rank)")
+                .font(.headline)
+                .foregroundColor(rank == 1 ? .yellowAccent : .white)
+                .frame(width: 36)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(name)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white)
+                HStack(spacing: 8) {
+                    Label(String(format: "%.2f km", distanceMeters / 1000.0), systemImage: "figure.run")
+                    Text("•")
+                    Label(String(format: "%.1f km/h", averageSpeed * 3.6), systemImage: "speedometer")
+                }
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.7))
+            }
+            
+            Spacer()
+        }
+        .padding()
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    private func participantDetailCard(name: String, distance: Double, duration: TimeInterval, avgSpeed: Double, state: ParticipantSessionState?) -> some View {
+        HStack(spacing: 12) {
+            // Avatar placeholder
+            ZStack {
+                Circle()
+                    .fill(Color.coralAccent.opacity(0.25))
+                    .frame(width: 44, height: 44)
+                Image(systemName: "person.fill")
+                    .foregroundColor(.coralAccent)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(.subheadline.bold())
+                    .foregroundColor(.white)
+                
+                HStack(spacing: 8) {
+                    Label(String(format: "%.2f km", distance / 1000.0), systemImage: "figure.run")
+                    Text("•")
+                    Label(formatDuration(duration), systemImage: "clock")
+                    Text("•")
+                    Label(String(format: "%.1f km/h", avgSpeed * 3.6), systemImage: "speedometer")
+                }
+                .font(.caption2)
+                .foregroundColor(.white.opacity(0.7))
+            }
+            
+            Spacer()
+            
+            // État (si disponible)
+            if let state = state {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(stateColor(for: state.status))
+                        .frame(width: 8, height: 8)
+                    Text(state.status.displayName)
+                        .font(.caption2)
+                        .foregroundColor(.white.opacity(0.8))
+                }
+            }
+        }
+        .padding()
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    // MARK: - Status Color Mapping (uses ParticipantStatus)
+    private func stateColor(for status: ParticipantStatus) -> Color {
+        switch status {
+        case .waiting: return .gray
+        case .active: return .green
+        case .paused: return .orange
+        case .ended: return .gray
+        case .abandoned: return .red
+        }
+    }
+    
+    private func mapStatItem(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(.coralAccent)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.7))
+            Spacer()
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity)
     }
     
     // MARK: - Helper Functions
@@ -346,6 +490,15 @@ struct SessionHistoryDetailView: View {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
         return formatter.string(from: date)
+    }
+    
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let hours = Int(duration) / 3600
+        let minutes = (Int(duration) % 3600) / 60
+        let seconds = Int(duration) % 60
+        return hours > 0
+        ? String(format: "%02d:%02d:%02d", hours, minutes, seconds)
+        : String(format: "%02d:%02d", minutes, seconds)
     }
 }
 
@@ -370,6 +523,51 @@ enum HistoryTab: CaseIterable {
         case .participants: return "person.3.fill"
         case .map: return "map.fill"
         }
+    }
+}
+
+// MARK: - Inline Cards (private)
+
+private struct InlineStatCardBig: View {
+    let icon: String
+    let value: String
+    let label: String
+    let color: Color
+    
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon)
+                .font(.title2)
+                .foregroundColor(color)
+            Text(value)
+                .font(.headline)
+                .foregroundColor(.white)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+private struct InlineSecondaryStat: View {
+    let icon: String
+    let label: String
+    let value: String
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: icon)
+                .foregroundColor(.coralAccent)
+            Text(label)
+                .font(.caption)
+                .foregroundColor(.white.opacity(0.7))
+            Spacer()
+            Text(value)
+                .font(.subheadline.bold())
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

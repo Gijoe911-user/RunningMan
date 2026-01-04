@@ -26,6 +26,7 @@ class SessionHistoryViewModel: ObservableObject {
     
     let session: SessionModel
     private let db = Firestore.firestore()
+    private let routeHistoryService = RouteHistoryService.shared
     
     // MARK: - Computed Properties
     
@@ -36,7 +37,7 @@ class SessionHistoryViewModel: ObservableObject {
     
     /// Dénivelé positif calculé à partir des points GPS
     var elevationGain: Double? {
-        // TODO: Calculer depuis les altitudes des points GPS
+        // TODO: Calculer depuis les altitudes des points GPS si disponibles (non stockées actuellement)
         nil
     }
     
@@ -55,11 +56,12 @@ class SessionHistoryViewModel: ObservableObject {
         
         do {
             // Charger en parallèle pour optimiser
-            async let statsTask = loadParticipantStats()
-            async let routeTask = loadRoutePoints()
-            async let usersTask = loadUserNames()
+            async let stats = loadParticipantStats()
+            async let route = loadRoutePoints()
+            async let users = loadUserNames()
             
-            _ = try await (statsTask, routeTask, usersTask)
+            // Attendre la fin des 3 chargements
+            try await (stats, route, users)
             
             Logger.logSuccess("✅ Détails de session chargés", category: .service)
         } catch {
@@ -94,59 +96,36 @@ class SessionHistoryViewModel: ObservableObject {
     // MARK: - Load Route Points
     
     /// Charge les points GPS du parcours enregistré
+    /// Utilise RouteHistoryService: sessions/{sessionId}/routes/{userId}/points
     private func loadRoutePoints() async throws {
         guard let sessionId = session.id else { return }
         
-        Logger.log("🗺️ Chargement du parcours pour session: \(sessionId)", category: .service)
-        
-        // Option 1 : Si le parcours est stocké dans une sous-collection "route"
-        let routeCollection = db.collection("sessions")
-            .document(sessionId)
-            .collection("route")
-            .order(by: "timestamp", descending: false)
-        
-        let snapshot = try await routeCollection.getDocuments()
-        
-        routePoints = snapshot.documents.compactMap { doc in
-            guard let latitude = doc.data()["latitude"] as? Double,
-                  let longitude = doc.data()["longitude"] as? Double else {
-                return nil
+        // Choisir un participant de référence pour l'affichage du parcours:
+        // 1) créateur si présent, sinon 2) premier participant de la liste
+        let referenceUserId: String? = {
+            if session.participants.contains(session.creatorId) {
+                return session.creatorId
             }
-            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-        }
+            return session.participants.first
+        }()
         
-        // Option 2 : Si aucun point, essayer de charger depuis le premier participant
-        if routePoints.isEmpty {
-            try await loadRouteFromFirstParticipant()
-        }
-        
-        Logger.log("✅ \(routePoints.count) points GPS chargés", category: .service)
-    }
-    
-    /// Charge le parcours du premier participant (fallback)
-    private func loadRouteFromFirstParticipant() async throws {
-        guard let sessionId = session.id,
-              let firstParticipant = session.participants.first else {
+        guard let userId = referenceUserId else {
+            Logger.log("⚠️ Aucun participant pour charger le parcours", category: .service)
+            routePoints = []
             return
         }
         
-        Logger.log("🔄 Chargement du parcours du participant: \(firstParticipant)", category: .service)
+        Logger.log("🗺️ Chargement du parcours (userId: \(userId)) pour session: \(sessionId)", category: .service)
         
-        let routeCollection = db.collection("sessions")
-            .document(sessionId)
-            .collection("participants")
-            .document(firstParticipant)
-            .collection("route")
-            .order(by: "timestamp", descending: false)
-        
-        let snapshot = try await routeCollection.getDocuments()
-        
-        routePoints = snapshot.documents.compactMap { doc in
-            guard let latitude = doc.data()["latitude"] as? Double,
-                  let longitude = doc.data()["longitude"] as? Double else {
-                return nil
-            }
-            return CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+        do {
+            let points = try await routeHistoryService.loadRoutePoints(sessionId: sessionId, userId: userId)
+            let coords = points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
+            routePoints = coords
+            Logger.log("✅ \(routePoints.count) points GPS chargés", category: .service)
+        } catch {
+            Logger.logError(error, context: "loadRoutePoints", category: .service)
+            routePoints = []
+            throw error
         }
     }
     
@@ -166,7 +145,7 @@ class SessionHistoryViewModel: ObservableObject {
             }
             
             for await (userId, name) in group {
-                if let name = name {
+                if let name = name, !name.isEmpty {
                     userNames[userId] = name
                 } else {
                     userNames[userId] = "Coureur #\(userId.prefix(6))"
@@ -197,3 +176,4 @@ class SessionHistoryViewModel: ObservableObject {
         userNames[userId] ?? "Coureur #\(userId.prefix(6))"
     }
 }
+

@@ -169,7 +169,7 @@ struct SessionDetailsPanel: View {
                     icon: "location.fill",
                     title: "Distance",
                     value: SessionStatsFormatters.formatDistance(currentDistance),
-                    color: .green
+                    color: Color.green
                 )
                 
                 // Allure
@@ -177,7 +177,7 @@ struct SessionDetailsPanel: View {
                     icon: "speedometer",
                     title: "Allure",
                     value: paceFormatted,
-                    color: .purple
+                    color: Color.purple
                 )
                 
                 // Vitesse
@@ -185,7 +185,7 @@ struct SessionDetailsPanel: View {
                     icon: "gauge.high",
                     title: "Vitesse",
                     value: speedFormatted,
-                    color: .cyan
+                    color: Color.cyan
                 )
                 
                 // BPM
@@ -194,7 +194,7 @@ struct SessionDetailsPanel: View {
                         icon: "heart.fill",
                         title: "BPM",
                         value: "\(Int(bpm))",
-                        color: .red
+                        color: Color.red
                     )
                 }
             }

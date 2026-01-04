@@ -89,7 +89,14 @@ struct EnhancedSessionMapView: View {
                 // Tracé de votre parcours (en dégradé coral/pink)
                 if !routeCoordinates.isEmpty {
                     MapPolyline(coordinates: routeCoordinates)
-                        .stroke(Color.red, lineWidth: 15)  // ✅ TEST: Ligne ROUGE ÉPAISSE
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.coralAccent, Color.pinkAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            lineWidth: 2.5  // 🎯 Trait fin et élégant
+                        )
                 }
                 
                 // Tracés des autres coureurs (couleurs différentes)
@@ -98,7 +105,7 @@ struct EnhancedSessionMapView: View {
                         MapPolyline(coordinates: coordinates)
                             .stroke(
                                 runnerColor(for: runnerId),
-                                lineWidth: 5
+                                lineWidth: 2  // 🎯 Légèrement plus fin pour les autres
                             )
                     }
                 }

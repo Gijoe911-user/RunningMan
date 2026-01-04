@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import FirebaseFirestore
 
 struct CreateSessionView: View {
     let squad: SquadModel
@@ -240,21 +241,19 @@ struct CreateSessionView: View {
                 
                 // Ne garder qu'un seul point
                 if filtered.filter({ $0 == "." }).count > 1 {
-                    if let firstDotIndex = filtered.firstIndex(of: ".") {
-                        var result = ""
-                        var dotSeen = false
-                        for char in filtered {
-                            if char == "." {
-                                if !dotSeen {
-                                    result.append(char)
-                                    dotSeen = true
-                                }
-                            } else {
+                    var result = ""
+                    var dotSeen = false
+                    for char in filtered {
+                        if char == "." {
+                            if !dotSeen {
                                 result.append(char)
+                                dotSeen = true
                             }
+                        } else {
+                            result.append(char)
                         }
-                        filtered = result
                     }
+                    filtered = result
                 }
                 
                 // Limiter à 2 décimales
@@ -368,21 +367,27 @@ struct CreateSessionView: View {
                 Logger.log("🚀 Création de la session...", category: .session)
                 
                 // Créer la session via le service
-                let _ = try await SessionService.shared.createSession(
+                let createdSession = try await SessionService.shared.createSession(
                     squadId: squadId,
                     creatorId: userId,
                     startLocation: nil
                 )
                 
+                Logger.logSuccess("✅ Session créée: \(createdSession.id ?? "unknown")", category: .session)
+                
+                // 🎯 FIX: NE PLUS démarrer le tracking automatiquement
+                // La session reste en mode SCHEDULED (spectateur par défaut)
+                // L'utilisateur devra cliquer sur "Démarrer l'activité" pour passer en mode coureur
+                
+                Logger.log("✅ Session en mode SCHEDULED - attente action utilisateur", category: .session)
+                
                 timeoutTask.cancel()
                 isCreating = false
-                
-                Logger.logSuccess("✅ Session créée avec succès", category: .session)
                 
                 // Fermer la sheet
                 dismiss()
                 
-                // Notifier que la session est créée
+                // Notifier que la session est créée ET active
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     onSessionCreated?()
                 }

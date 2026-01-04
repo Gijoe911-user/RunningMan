@@ -247,9 +247,14 @@ class SessionsViewModel: NSObject, ObservableObject {
             .receive(on: RunLoop.main)
             .sink { [weak self] coord in
                 guard let coord = coord else { return }
+                
+                Logger.log("[AUDIT-LIVE-01] 📍 userCoordinate changé → lat: \(coord.latitude), lon: \(coord.longitude)", category: .location)
+                
                 self?.userLocation = coord
                 self?.routeService.addRoutePoint(coord)
                 self?.routeCoordinates = self?.routeService.getCurrentRoute() ?? []
+                
+                Logger.log("[AUDIT-LIVE-02] 📊 routeCoordinates mis à jour → count: \(self?.routeCoordinates.count ?? 0)", category: .location)
             }
             .store(in: &cancellables)
     }
@@ -267,16 +272,49 @@ class SessionsViewModel: NSObject, ObservableObject {
     ///   - sessionId: ID de la session active
     ///   - userId: ID de l'utilisateur
     private func setupActiveSessionProcess(sessionId: String, userId: String) {
-        routeService.startAutoSave(sessionId: sessionId, userId: userId)
-        startHealthKitMonitoring(sessionId: sessionId)
+        Logger.log("[AUDIT-SVM-01] 🚀 setupActiveSessionProcess - sessionId: \(sessionId)", category: .session)
         
-        // Démarrer le rafraîchissement des tracés des autres toutes les 30s
-        routeRefreshTask?.cancel()
-        routeRefreshTask = Task {
-            while !Task.isCancelled {
-                await loadRunnerRoutes(sessionId: sessionId)
-                try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 secondes
+        // 🎯 FIX SAUT VISUEL : Charger l'historique AVANT de démarrer le tracking live
+        Task {
+            do {
+                // 1. Charger le tracé existant avec ses timestamps
+                Logger.log("[AUDIT-SVM-02] 📥 Chargement de l'historique...", category: .session)
+                let (coordinates, timestamps) = try await routeService.loadRouteWithTimestamps(
+                    sessionId: sessionId,
+                    userId: userId
+                )
+                
+                // 2. Seeder le tracé (pré-remplir la liste en mémoire)
+                if !coordinates.isEmpty {
+                    routeService.seedRoute(coordinates, timestamps: timestamps)
+                    
+                    // 3. Mettre à jour l'UI immédiatement avec l'historique
+                    self.routeCoordinates = routeService.getCurrentRoute()
+                    Logger.logSuccess("[AUDIT-SVM-03] ✅ Historique seedé: \(coordinates.count) points", category: .session)
+                } else {
+                    Logger.log("[AUDIT-SVM-04] ℹ️ Aucun historique à seeder (nouvelle session)", category: .session)
+                }
+            } catch {
+                // Si le chargement échoue (ex: première fois), on continue quand même
+                Logger.log("[AUDIT-SVM-05] ⚠️ Chargement historique échoué (probablement nouvelle session): \(error)", category: .session)
             }
+            
+            // 4. Démarrer l'auto-save (après le seeding)
+            routeService.startAutoSave(sessionId: sessionId, userId: userId)
+            
+            // 5. Démarrer le monitoring HealthKit
+            startHealthKitMonitoring(sessionId: sessionId)
+            
+            // 6. Démarrer le rafraîchissement des tracés des autres toutes les 30s
+            routeRefreshTask?.cancel()
+            routeRefreshTask = Task {
+                while !Task.isCancelled {
+                    await loadRunnerRoutes(sessionId: sessionId)
+                    try? await Task.sleep(nanoseconds: 30_000_000_000) // 30 secondes
+                }
+            }
+            
+            Logger.logSuccess("[AUDIT-SVM-06] ✅ Processus de session démarrés (historique + live)", category: .session)
         }
     }
     
@@ -309,7 +347,7 @@ class SessionsViewModel: NSObject, ObservableObject {
         
         Task {
             if !healthKitManager.isAuthorized {
-                try? await healthKitManager.requestAuthorization()
+                await healthKitManager.requestAuthorization()
             }
             healthKitManager.startHeartRateQuery(sessionId: sessionId)
             healthKitManager.startPeriodicStatsUpdate(sessionId: sessionId)

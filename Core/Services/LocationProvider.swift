@@ -22,8 +22,19 @@ final class LocationProvider: NSObject, ObservableObject {
     @Published private(set) var isUpdating: Bool = false
     
     // Config
-    var desiredAccuracy: CLLocationAccuracy = kCLLocationAccuracyBest
-    var distanceFilter: CLLocationDistance = 10 // mètres
+    var desiredAccuracy: CLLocationAccuracy = kCLLocationAccuracyBest {
+        didSet {
+            manager.desiredAccuracy = desiredAccuracy
+            Logger.log("🎯 Précision GPS mise à jour: \(desiredAccuracy)", category: .location)
+        }
+    }
+    
+    var distanceFilter: CLLocationDistance = 5 {  // 🎯 Optimisé à 5m pour un tracking plus réactif
+        didSet {
+            manager.distanceFilter = distanceFilter
+            Logger.log("📏 Filtre de distance mis à jour: \(distanceFilter)m", category: .location)
+        }
+    }
     
     // Internes
     private let manager = CLLocationManager()
@@ -77,6 +88,15 @@ extension LocationProvider: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let last = locations.last else { return }
         Task { @MainActor in
+            Logger.log("[AUDIT-LIVE-07] 🛰️ CLLocationManager didUpdateLocations → lat: \(last.coordinate.latitude), lon: \(last.coordinate.longitude), accuracy: \(last.horizontalAccuracy)m", category: .location)
+            
+            // 🎯 FILTRE CRITIQUE : Rejeter les points GPS de mauvaise précision
+            // Si précision > 50m, on ignore le point pour éviter les erreurs de triangulation MapKit
+            guard last.horizontalAccuracy <= 50 else {
+                Logger.log("⚠️ Point GPS rejeté (précision insuffisante: \(last.horizontalAccuracy)m)", category: .location)
+                return
+            }
+            
             currentCoordinate = last.coordinate
             
             // Vitesse (m/s) - CLLocation fournit déjà la vitesse
@@ -85,6 +105,8 @@ extension LocationProvider: CLLocationManagerDelegate {
             
             // Altitude
             currentAltitude = last.altitude
+            
+            Logger.log("[AUDIT-LIVE-08] 📡 currentCoordinate publié → lat: \(last.coordinate.latitude), lon: \(last.coordinate.longitude)", category: .location)
         }
     }
     

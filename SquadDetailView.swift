@@ -54,7 +54,7 @@ struct SquadDetailView: View {
                 // ✅ Invalider le cache lors du pull-to-refresh
                 if let squadId = squad.id {
                     SessionService.shared.invalidateCache(squadId: squadId)
-                    Logger.log("🔄 Cache invalidé via pull-to-refresh", category: .ui)
+                    Logger.log("[AUDIT-SDV-01] 🔄 SquadDetailView - Cache invalidé", category: .ui)
                 }
             }
         }
@@ -103,7 +103,7 @@ struct SquadDetailView: View {
             // Définir le contexte du service de localisation en temps réel
             if let squadId = squad.id {
                 RealtimeLocationService.shared.setContext(squadId: squadId)
-                Logger.log("🎯 Contexte défini pour squad: \(squadId)", category: .location)
+                Logger.log("[AUDIT-SDV-02] 🎯 SquadDetailView.task - Contexte défini pour squad: \(squadId)", category: .location)
             }
         }
     }
@@ -304,28 +304,26 @@ struct SquadDetailView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             
-            // Bouton Démarrer Session (si admin/coach)
-            if canStartSession {
-                Button {
-                    showStartSession = true
-                } label: {
-                    HStack {
-                        Image(systemName: "play.circle.fill")
-                        Text("Démarrer une session")
-                    }
-                    .font(.subheadline.bold())
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(
-                        LinearGradient(
-                            colors: [Color.coralAccent, Color.pinkAccent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                    )
-                    .foregroundColor(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            // Bouton Démarrer Session (TOUS les membres peuvent créer)
+            Button {
+                showStartSession = true
+            } label: {
+                HStack {
+                    Image(systemName: "play.circle.fill")
+                    Text("Démarrer une session")
                 }
+                .font(.subheadline.bold())
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(
+                    LinearGradient(
+                        colors: [Color.coralAccent, Color.pinkAccent],
+                        startPoint: .leading,
+                        endPoint: .trailing
+                    )
+                )
+                .foregroundColor(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             
             // Bouton Quitter Squad
@@ -355,11 +353,6 @@ struct SquadDetailView: View {
     private var isCreator: Bool {
         guard let userId = AuthService.shared.currentUserId else { return false }
         return squad.creatorId == userId
-    }
-    
-    private var canStartSession: Bool {
-        guard let userId = AuthService.shared.currentUserId else { return false }
-        return squad.canCreateSession(userId: userId)
     }
     
     // MARK: - Members Section

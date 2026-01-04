@@ -199,22 +199,26 @@ extension SessionModel {
     
     /// Distance formatée de la session
     var formattedDistance: String {
-        totalDistanceMeters.formattedDistanceKm
+        let distance: Double = totalDistanceMeters ?? 0
+        return distance.formattedDistanceKm
     }
     
     /// Durée formatée de la session
     var formattedSessionDuration: String {
-        durationSeconds.formattedDuration
+        let duration: TimeInterval = durationSeconds ?? 0
+        return duration.formattedDuration
     }
     
     /// Vitesse moyenne formatée
     var formattedAverageSpeed: String {
-        averageSpeed.formattedSpeedKmh
+        let speed: Double = averageSpeed ?? 0
+        return speed.formattedSpeedKmh
     }
     
     /// Allure moyenne formatée
     var formattedAveragePace: String {
-        averageSpeed.formattedPaceMinKm
+        let speed: Double = averageSpeed ?? 0
+        return speed.formattedPaceMinKm
     }
     
     /// Date de début formatée

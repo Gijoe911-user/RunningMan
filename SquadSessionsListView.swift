@@ -130,7 +130,8 @@ struct SquadSessionsListView: View {
                     emptyActiveSessionsView
                 } else {
                     ForEach(activeSessions.filter { $0.id != nil }) { session in
-                        NavigationLink(destination: ActiveSessionDetailView(session: session)) {
+                        // ✅ FIX: Utiliser SessionHistoryDetailView en attendant ActiveSessionDetailView
+                        NavigationLink(destination: SessionHistoryDetailView(session: session)) {
                             ActiveSessionCard(session: session)
                         }
                         .buttonStyle(.plain)
@@ -217,7 +218,7 @@ struct SquadSessionsListView: View {
         
         // ✅ Invalider le cache avant de recharger
         SessionService.shared.invalidateCache(squadId: squadId)
-        Logger.log("🔄 Cache invalidé avant rechargement", category: .ui)
+        Logger.log("[AUDIT-SSL-01] 🔄 SquadSessionsListView.loadSessions - Cache invalidé pour squad: \(squadId)", category: .ui)
         
         isLoading = true
         errorMessage = nil  // Reset l'erreur précédente
@@ -372,6 +373,9 @@ struct ActiveSessionCard: View {
         }
     }
 }
+
+// MARK: - Components are now imported from SessionCardComponents.swift
+// HistorySessionCard and StatBadgeCompact are defined there
 
 // MARK: - Preview
 

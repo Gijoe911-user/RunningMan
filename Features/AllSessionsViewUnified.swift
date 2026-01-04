@@ -44,8 +44,8 @@ struct AllSessionsViewUnified: View {
                         }
                         
                         // Message si aucune session
-                        if viewModel.allActiveSessions.isEmpty && 
-                           viewModel.recentHistory.isEmpty && 
+                        if viewModel.allActiveSessions.isEmpty &&
+                           viewModel.recentHistory.isEmpty &&
                            !viewModel.isLoading {
                             emptyStateView
                         }
@@ -70,7 +70,15 @@ struct AllSessionsViewUnified: View {
                 }
             }
             .task {
+                // Chargement initial
                 await loadSessions()
+            }
+            .onAppear {
+                // Retry après un court délai pour éviter la "page vide" si le listener/squads ne sont pas prêts
+                Task {
+                    try? await Task.sleep(nanoseconds: 300_000_000) // 0.3s
+                    await loadSessions()
+                }
             }
             .sheet(isPresented: $showCreateSession) {
                 if let squad = selectedSquadForSession {
@@ -94,7 +102,8 @@ struct AllSessionsViewUnified: View {
                 .foregroundColor(.white)
             
             NavigationLink {
-                SessionTrackingView(session: session)
+                // Navigation unifiée vers la nouvelle vue détail
+                SessionDetailView(session: session)
             } label: {
                 TrackingSessionCard(
                     session: session,
@@ -116,7 +125,8 @@ struct AllSessionsViewUnified: View {
             
             ForEach(viewModel.supporterSessions) { session in
                 NavigationLink {
-                    ActiveSessionDetailView(session: session)
+                    // Navigation unifiée vers la nouvelle vue détail
+                    SessionDetailView(session: session)
                 } label: {
                     SupporterSessionCard(session: session)
                 }
@@ -132,27 +142,30 @@ struct AllSessionsViewUnified: View {
                 .font(.headline)
                 .foregroundColor(.white)
             
-            // ✅ Utilisation du nouveau SessionRowCard
             ForEach(viewModel.allActiveSessions) { session in
-                SessionRowCard(
-                    session: session,
-                    // On vérifie si cette session est celle que l'utilisateur suit actuellement
-                    isMyTracking: session.id == viewModel.myActiveTrackingSession?.id,
-                    onJoin: {
-                        Task {
-                            if let sessionId = session.id {
-                                _ = await viewModel.joinSessionAsSupporter(sessionId: sessionId)
+                // Navigation globale vers le détail; les boutons internes restent actifs
+                NavigationLink {
+                    SessionDetailView(session: session)
+                } label: {
+                    SessionRowCard(
+                        session: session,
+                        isMyTracking: session.id == viewModel.myActiveTrackingSession?.id,
+                        onJoin: {
+                            Task {
+                                if let sessionId = session.id {
+                                    _ = await viewModel.joinSessionAsSupporter(sessionId: sessionId)
+                                    await loadSessions()
+                                }
+                            }
+                        },
+                        onStartTracking: {
+                            Task {
+                                _ = await viewModel.startTracking(for: session)
                                 await loadSessions()
                             }
                         }
-                    },
-                    onStartTracking: {
-                        Task {
-                            _ = await viewModel.startTracking(for: session)
-                            await loadSessions()
-                        }
-                    }
-                )
+                    )
+                }
             }
         }
     }
@@ -220,9 +233,8 @@ struct AllSessionsViewUnified: View {
     // MARK: - Actions
     
     private func loadSessions() async {
-        let squadIds = squadVM.userSquads.compactMap { $0.id }
-        guard !squadIds.isEmpty else { return }
-        await viewModel.loadAllActiveSessions(squadIds: squadIds)
+        // 🆕 La méthode ne prend plus de paramètres, elle utilise l'userId en interne
+        viewModel.loadAllActiveSessions()
     }
 }
 

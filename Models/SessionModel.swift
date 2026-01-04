@@ -21,18 +21,19 @@ struct SessionModel: Identifiable, Codable, Hashable {
     var status: SessionStatus
     var participants: [String]
     
-    // Statistiques
-    var totalDistanceMeters: Double
-    var durationSeconds: TimeInterval
-    var averageSpeed: Double
+    // Statistiques (tous optionnels pour rétrocompatibilité totale)
+    var totalDistanceMeters: Double?
+    var durationSeconds: TimeInterval?
+    var averageSpeed: Double?
     var startLocation: GeoPoint?
-    var messageCount: Int
+    var messageCount: Int?
     
     // Champs optionnels
     var targetDistanceMeters: Double?
+    var targetDuration: TimeInterval?  // 🆕 Durée cible pour la session (en secondes)
     var title: String?
     var notes: String?
-    var activityType: ActivityType
+    var activityType: ActivityType  // Avec défaut .training si absent
     
     // 🆕 Programme d'entraînement associé
     var trainingProgramId: String?
@@ -41,7 +42,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
     var meetingLocationName: String?        // Ex: "Parc de la Tête d'Or, Lyon"
     var meetingLocationCoordinate: GeoPoint?  // Coordonnées du lieu de RDV
     
-    // 🆕 NOUVEAUX CHAMPS - Refonte Incrément 3
+    // 🆕 NOUVEAUX CHAMPS - Refonte Incrément 3 (tous optionnels)
     var runType: RunType?
     var visibility: SessionVisibility?
     var isJoinable: Bool?
@@ -51,6 +52,11 @@ struct SessionModel: Identifiable, Codable, Hashable {
     /// État de chaque participant dans la session
     /// Key: userId, Value: état du participant
     var participantStates: [String: ParticipantSessionState]?
+    
+    // 🆕 HEARTBEAT - Tracking de l'activité des participants
+    /// Dernière activité de chaque participant (timestamp + état tracking/spectateur)
+    /// Key: userId, Value: dernière mise à jour
+    var participantActivity: [String: ParticipantActivity]?
     
     var createdAt: Date?
     var updatedAt: Date?
@@ -65,12 +71,13 @@ struct SessionModel: Identifiable, Codable, Hashable {
         endedAt: Date? = nil,
         status: SessionStatus = .active,
         participants: [String] = [],
-        totalDistanceMeters: Double = 0,
-        durationSeconds: TimeInterval = 0,
-        averageSpeed: Double = 0,
+        totalDistanceMeters: Double? = nil,
+        durationSeconds: TimeInterval? = nil,
+        averageSpeed: Double? = nil,
         startLocation: GeoPoint? = nil,
-        messageCount: Int = 0,
+        messageCount: Int? = nil,
         targetDistanceMeters: Double? = nil,
+        targetDuration: TimeInterval? = nil,
         title: String? = nil,
         notes: String? = nil,
         activityType: ActivityType = .training,
@@ -82,6 +89,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
         isJoinable: Bool? = true,
         maxParticipants: Int? = nil,
         participantStates: [String: ParticipantSessionState]? = nil,
+        participantActivity: [String: ParticipantActivity]? = nil,
         createdAt: Date? = nil,
         updatedAt: Date? = nil
     ) {
@@ -98,6 +106,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
         self.startLocation = startLocation
         self.messageCount = messageCount
         self.targetDistanceMeters = targetDistanceMeters
+        self.targetDuration = targetDuration
         self.title = title
         self.notes = notes
         self.activityType = activityType
@@ -109,13 +118,15 @@ struct SessionModel: Identifiable, Codable, Hashable {
         self.isJoinable = isJoinable
         self.maxParticipants = maxParticipants
         self.participantStates = participantStates
+        self.participantActivity = participantActivity
         self.createdAt = createdAt ?? Date()
         self.updatedAt = updatedAt ?? Date()
     }
     
     // ✅ @DocumentID gère automatiquement l'ID
-    // ✅ Pas de CodingKeys personnalisé
-    // ✅ Pas de init(from:) / encode(to:) personnalisé
+    // ✅ Firestore décode/encode automatiquement tous les champs
+    // 🆕 Les nouveaux champs (targetDuration, participantActivity) sont optionnels
+    //     donc pas de crash sur les anciennes données
     
     // MARK: - Computed Properties (Logique métier)
     
@@ -124,20 +135,24 @@ struct SessionModel: Identifiable, Codable, Hashable {
     var isPaused: Bool { status == .paused }
     var isEnded: Bool { status == .ended }
     
-    var distanceInKilometers: Double { totalDistanceMeters / 1000.0 }
+    var distanceInKilometers: Double { (totalDistanceMeters ?? 0) / 1000.0 }
     
     var formattedDuration: String {
-        let hours = Int(durationSeconds) / 3600
-        let minutes = (Int(durationSeconds) % 3600) / 60
-        let seconds = Int(durationSeconds) % 60
+        let duration: TimeInterval = durationSeconds ?? 0
+        let hours = Int(duration) / 3600
+        let minutes = (Int(duration) % 3600) / 60
+        let seconds = Int(duration) % 60
         return hours > 0 ? String(format: "%02d:%02d:%02d", hours, minutes, seconds) : String(format: "%02d:%02d", minutes, seconds)
     }
     
-    var averageSpeedKmh: Double { averageSpeed * 3.6 }
+    var averageSpeedKmh: Double {
+        let speed: Double = averageSpeed ?? 0
+        return speed * 3.6
+    }
     
     var averagePaceMinPerKm: String {
-        guard averageSpeed > 0 else { return "--:--" }
-        let minutesPerKm = (1000.0 / averageSpeed) / 60.0
+        guard let speed = averageSpeed, speed > 0 else { return "--:--" }
+        let minutesPerKm = (1000.0 / speed) / 60.0
         let minutes = Int(minutesPerKm)
         let seconds = Int((minutesPerKm - Double(minutes)) * 60)
         return String(format: "%d:%02d", minutes, seconds)
@@ -196,6 +211,51 @@ struct SessionModel: Identifiable, Codable, Hashable {
     /// - Returns: true si l'utilisateur est en course
     func isParticipantActive(_ userId: String) -> Bool {
         participantStates?[userId]?.isCurrentlyActive ?? false
+    }
+    
+    // MARK: - Heartbeat & Activity Tracking
+    
+    /// Nombre de participants ACTUELLEMENT en train de tracker (pas spectateurs)
+    var activeTrackingParticipantsCount: Int {
+        participantActivity?.values.filter { $0.isTracking && !$0.isInactive }.count ?? 0
+    }
+    
+    /// Nombre total de spectateurs (connectés mais pas en train de courir)
+    var spectatorCount: Int {
+        participantActivity?.values.filter { !$0.isTracking }.count ?? 0
+    }
+    
+    /// Liste des IDs de participants inactifs (pas de signal depuis > 60s)
+    var inactiveParticipantIds: [String] {
+        guard let activity = participantActivity else { return [] }
+        return activity.filter { $0.value.isInactive }.map { $0.key }
+    }
+    
+    /// Vérifie si TOUS les participants tracking sont inactifs (session peut être terminée)
+    var allTrackingParticipantsInactive: Bool {
+        guard let activity = participantActivity, !activity.isEmpty else {
+            // Si pas de données d'activité, utiliser l'ancienne logique
+            return canBeEnded
+        }
+        
+        // Filtrer uniquement les participants qui trackent
+        let trackingParticipants = activity.values.filter { $0.isTracking }
+        
+        // Si aucun participant ne tracke, la session peut être terminée
+        guard !trackingParticipants.isEmpty else { return true }
+        
+        // Tous les participants tracking doivent être inactifs
+        return trackingParticipants.allSatisfy { $0.isInactive }
+    }
+    
+    /// Obtient l'activité d'un participant spécifique
+    func participantActivity(for userId: String) -> ParticipantActivity? {
+        participantActivity?[userId]
+    }
+    
+    /// Vérifie si un participant est considéré comme inactif (> 60s sans signal)
+    func isParticipantInactive(_ userId: String) -> Bool {
+        participantActivity?[userId]?.isInactive ?? false
     }
 
     // MARK: - Hashable Implementation
@@ -310,5 +370,92 @@ struct LocationPoint: Codable {
     var horizontalAccuracy: Double
     var timestamp: Date
     @ServerTimestamp var serverTimestamp: Timestamp?
+}
+
+// MARK: - Participant Activity (Heartbeat)
+
+/// 🆕 Représente l'activité d'un participant dans une session
+///
+/// Utilisé pour le système de "heartbeat" qui détecte automatiquement
+/// les participants inactifs (connexion perdue, app fermée, etc.)
+///
+/// **Logique d'inactivité :**
+/// - Un participant est considéré inactif si `lastUpdate` > 60 secondes
+/// - MAIS un coureur immobile qui envoie encore GPS/BPM reste actif
+/// - Seul l'absence totale de signal déclenche l'inactivité
+struct ParticipantActivity: Codable, Hashable {
+    /// Date de la dernière activité (GPS, heartbeat, ou autre signal)
+    var lastUpdate: Date
+    
+    /// Indique si le participant est en mode tracking (coureur) ou spectateur
+    var isTracking: Bool
+    
+    /// Dernière position GPS connue (optionnelle)
+    var lastLocation: GeoPoint?
+    
+    /// Dernier BPM connu (optionnel)
+    var lastHeartRate: Double?
+    
+    // MARK: - Computed Properties
+    
+    /// Temps écoulé depuis la dernière activité (en secondes)
+    var timeSinceLastUpdate: TimeInterval {
+        Date().timeIntervalSince(lastUpdate)
+    }
+    
+    /// Indique si le participant est considéré comme inactif (> 60s sans signal)
+    var isInactive: Bool {
+        timeSinceLastUpdate > 60
+    }
+    
+    /// Indique si le participant est actif et en train de tracker
+    var isActivelyTracking: Bool {
+        isTracking && !isInactive
+    }
+    
+    // MARK: - Initialization
+    
+    init(
+        lastUpdate: Date = Date(),
+        isTracking: Bool = false,
+        lastLocation: GeoPoint? = nil,
+        lastHeartRate: Double? = nil
+    ) {
+        self.lastUpdate = lastUpdate
+        self.isTracking = isTracking
+        self.lastLocation = lastLocation
+        self.lastHeartRate = lastHeartRate
+    }
+    
+    // MARK: - Update Methods
+    
+    /// Met à jour le timestamp d'activité
+    mutating func updateActivity() {
+        lastUpdate = Date()
+    }
+    
+    /// Met à jour avec une nouvelle position GPS
+    mutating func updateLocation(_ location: GeoPoint) {
+        lastUpdate = Date()
+        lastLocation = location
+    }
+    
+    /// Met à jour avec un nouveau BPM
+    mutating func updateHeartRate(_ bpm: Double) {
+        lastUpdate = Date()
+        lastHeartRate = bpm
+    }
+    
+    /// Bascule en mode tracking (coureur)
+    mutating func startTracking() {
+        isTracking = true
+        lastUpdate = Date()
+    }
+    
+    /// Bascule en mode spectateur
+    mutating func stopTracking() {
+        isTracking = false
+        lastUpdate = Date()
+    }
 }
 

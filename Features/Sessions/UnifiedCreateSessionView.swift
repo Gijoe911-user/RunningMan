@@ -130,12 +130,29 @@ struct UnifiedCreateSessionView: View {
     private var basicsStep: some View {
         ScrollView {
             VStack(spacing: 24) {
-                // Header
-                SessionStepHeader(
-                    icon: "figure.run",
-                    title: "Type de session",
-                    subtitle: "Choisissez le type d'activité"
-                )
+                // Header - Type de session
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.coralAccent.opacity(0.2))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "figure.run")
+                            .font(.headline)
+                            .foregroundColor(.coralAccent)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Type de session")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("Choisissez le type d'activité")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 
                 // Type de session
                 VStack(spacing: 12) {
@@ -158,12 +175,29 @@ struct UnifiedCreateSessionView: View {
                     .background(.white.opacity(0.2))
                     .padding(.vertical)
                 
-                // Rôle de l'utilisateur
-                SessionStepHeader(
-                    icon: "person.fill",
-                    title: "Votre rôle",
-                    subtitle: "Comment participez-vous ?"
-                )
+                // Header - Votre rôle
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.coralAccent.opacity(0.2))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "person.fill")
+                            .font(.headline)
+                            .foregroundColor(.coralAccent)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Votre rôle")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("Comment participez-vous ?")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 
                 VStack(spacing: 12) {
                     RoleButton(
@@ -190,11 +224,29 @@ struct UnifiedCreateSessionView: View {
     private var goalsStep: some View {
         ScrollView {
             VStack(spacing: 24) {
-                SessionStepHeader(
-                    icon: "target",
-                    title: "Objectifs",
-                    subtitle: "Fixez vos objectifs pour la session"
-                )
+                // Header - Objectifs
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.coralAccent.opacity(0.2))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "target")
+                            .font(.headline)
+                            .foregroundColor(.coralAccent)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Objectifs")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("Fixez vos objectifs pour la session")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 
                 // Distance
                 VStack(alignment: .leading, spacing: 12) {
@@ -278,11 +330,29 @@ struct UnifiedCreateSessionView: View {
     private var optionsStep: some View {
         ScrollView {
             VStack(spacing: 24) {
-                SessionStepHeader(
-                    icon: "gear",
-                    title: "Options",
-                    subtitle: "Personnalisez votre session"
-                )
+                // Header - Options
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.coralAccent.opacity(0.2))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "gear")
+                            .font(.headline)
+                            .foregroundColor(.coralAccent)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Options")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("Personnalisez votre session")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 
                 // Titre
                 VStack(alignment: .leading, spacing: 8) {
@@ -405,11 +475,29 @@ struct UnifiedCreateSessionView: View {
     private var summaryStep: some View {
         ScrollView {
             VStack(spacing: 24) {
-                SessionStepHeader(
-                    icon: "checkmark.circle.fill",
-                    title: "Récapitulatif",
-                    subtitle: "Vérifiez les détails avant de créer"
-                )
+                // Header - Récapitulatif
+                HStack(spacing: 12) {
+                    ZStack {
+                        Circle()
+                            .fill(Color.coralAccent.opacity(0.2))
+                            .frame(width: 40, height: 40)
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.headline)
+                            .foregroundColor(.coralAccent)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Récapitulatif")
+                            .font(.headline)
+                            .foregroundColor(.white)
+                        Text("Vérifiez les détails avant de créer")
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    Spacer()
+                }
+                .padding()
+                .background(.ultraThinMaterial)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
                 
                 // Type et rôle
                 SummarySection(title: "Session") {
@@ -722,8 +810,8 @@ struct SessionTypeButton: View {
                 
                 if isSelected {
                     Image(systemName: "checkmark.circle.fill")
-                        .foregroundColor(.coralAccent)
-                        .font(.title3)
+                    .foregroundColor(.coralAccent)
+                    .font(.title3)
                 }
             }
             .padding()

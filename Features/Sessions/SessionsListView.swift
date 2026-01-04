@@ -83,7 +83,7 @@ struct SessionsListView: View {
             routeCoordinates: viewModel.routeCoordinates,
             runnerRoutes: [:], // TODO: Ajouter les tracés des autres coureurs
             onRecenter: {
-                Logger.log("🎯 Recentré sur l'utilisateur", category: .location)
+                Logger.log("[AUDIT-SLV-01] 🎯 SessionsListView.onRecenter appelé", category: .location)
             },
             onSaveRoute: {
                 saveCurrentRoute()
@@ -187,12 +187,14 @@ struct SessionsListView: View {
     
     /// Configure la vue au démarrage
     private func setupView() {
+        Logger.log("[AUDIT-SLV-02] 🔧 SessionsListView.setupView appelé", category: .ui)
         viewModel.startLocationUpdates()
         viewModel.centerOnUserLocation()
     }
     
     /// Configure le contexte de la squad sélectionnée
     private func configureSquadContext() {
+        Logger.log("[AUDIT-SLV-03] 🎯 SessionsListView.configureSquadContext appelé", category: .ui)
         guard let squadId = squadsVM.selectedSquad?.id else { return }
         if configuredSquadId != squadId {
             viewModel.setContext(squadId: squadId)
@@ -202,6 +204,7 @@ struct SessionsListView: View {
     
     /// Sauvegarde le tracé actuel dans Firebase
     private func saveCurrentRoute() {
+        Logger.log("[AUDIT-SLV-04] 💾 SessionsListView.saveCurrentRoute appelé", category: .location)
         guard let session = viewModel.activeSession,
               let sessionId = session.id,
               let userId = AuthService.shared.currentUserId else {

@@ -21,6 +21,7 @@ enum SessionError: LocalizedError {
     }
 }
 
+@MainActor // 🆕 Swift 6 compliance
 class SessionService {
     
     static let shared = SessionService()
@@ -32,7 +33,7 @@ class SessionService {
     
     // ✅ Cache pour éviter les requêtes multiples
     private var sessionCache: [String: (sessions: [SessionModel], timestamp: Date)] = [:]
-    private let cacheValidityDuration: TimeInterval = 5.0  // ✅ 5 secondes (réduit pour le développement)
+    private let cacheValidityDuration: TimeInterval = 2.0  // ✅ 2 secondes (optimisé pour développement)
     
     private init() {
         Logger.log("SessionService initialisé", category: .session)
@@ -60,18 +61,36 @@ class SessionService {
     // MARK: - Create Session
     
     /// Crée une nouvelle session - Version RAPIDE avec fire-and-forget
+    ///
+    /// ⚠️ **IMPORTANT pour la vision métier :**
+    /// - La session est créée en statut `.scheduled` (GPS ÉTEINT)
+    /// - Le créateur est ajouté comme participant en mode "waiting"
+    /// - Le tracking GPS ne démarre PAS automatiquement
+    /// - L'utilisateur doit cliquer sur "Démarrer" pour activer le GPS
+    ///
+    /// - Parameters:
+    ///   - squadId: ID de la squad
+    ///   - creatorId: ID de l'utilisateur créateur
+    ///   - startLocation: Position GPS optionnelle (si disponible)
+    /// - Returns: Session créée avec ID assigné
+    /// - Throws: Erreur Firestore si l'enregistrement échoue
     func createSession(
         squadId: String,
         creatorId: String,
         startLocation: GeoPoint? = nil
     ) async throws -> SessionModel {
         
-        Logger.log("Création d'une nouvelle session pour squad: \(squadId)", category: .session)
+        Logger.log("🆕 Création d'une nouvelle session pour squad: \(squadId)", category: .session)
         print("🔨 createSession appelé pour squadId: \(squadId)")
         
-        // 🆕 Initialiser l'état du créateur comme "waiting"
+        // 🆕 Initialiser l'état du créateur comme "waiting" (spectateur)
         let initialParticipantStates: [String: ParticipantSessionState] = [
             creatorId: .waiting()
+        ]
+        
+        // 🆕 Initialiser l'activité du créateur comme spectateur (pas de tracking)
+        let initialParticipantActivity: [String: ParticipantActivity] = [
+            creatorId: ParticipantActivity(lastUpdate: Date(), isTracking: false)
         ]
         
         // Créer la session localement (sans ID, @DocumentID le gérera)
@@ -82,25 +101,26 @@ class SessionService {
             status: .scheduled, // 🆕 Commence en "scheduled", devient "active" quand premier participant démarre
             participants: [creatorId],
             startLocation: startLocation,
-            participantStates: initialParticipantStates
+            participantStates: initialParticipantStates,
+            participantActivity: initialParticipantActivity
         )
         
         let sessionRef = db.collection("sessions").document()
         
         print("💾 Enregistrement session dans Firestore: \(sessionRef.documentID)")
         
-        // 🚀 Fire-and-forget pour l'enregistrement
-        Task.detached {
-            do {
-                try sessionRef.setData(from: session)
-                Logger.log("✅ Session enregistrée dans Firestore", category: .session)
-            } catch {
-                Logger.log("⚠️ Erreur enregistrement session: \(error.localizedDescription)", category: .session)
-            }
+        // ✅ SYNCHRONE : Enregistrer la session AVANT de retourner
+        // Cela garantit que la session existe réellement en base
+        do {
+            try sessionRef.setData(from: session)
+            Logger.log("✅ Session enregistrée dans Firestore", category: .session)
+        } catch {
+            Logger.log("❌ Erreur enregistrement session: \(error.localizedDescription)", category: .session)
+            throw error
         }
         
-        // Ajouter à la squad en arrière-plan
-        Task.detached { [weak self] in
+        // Ajouter à la squad en arrière-plan (non-bloquant)
+        Task { @MainActor [weak self] in
             do {
                 try await self?.addSessionToSquad(squadId: squadId, sessionId: sessionRef.documentID)
                 Logger.log("✅ Session ajoutée à la squad", category: .session)
@@ -112,29 +132,43 @@ class SessionService {
         // Invalider le cache immédiatement
         invalidateCache(squadId: squadId)
         
-        Logger.logSuccess("Session créée (async): \(sessionRef.documentID)", category: .session)
+        Logger.logSuccess("✅ Session créée: \(sessionRef.documentID)", category: .session)
         print("✅ Session lancée - ID: \(sessionRef.documentID), Status: \(session.status.rawValue)")
         
-        // ✅ Relire depuis Firestore pour obtenir la session avec @DocumentID correctement assigné
-        // Retourner immédiatement pour ne pas bloquer (les listeners temps réel mettront à jour l'UI)
+        // ✅ Créer une copie avec l'ID assigné manuellement
+        // Note : Les listeners temps réel utiliseront @DocumentID automatiquement
         var sessionWithId = session
-        sessionWithId.id = sessionRef.documentID  // Assignation temporaire pour compatibilité immédiate
+        sessionWithId.id = sessionRef.documentID
         
         return sessionWithId
     }
     
     // MARK: - Join / Leave / Status
     
+    /// Ajoute un participant à une session existante
+    ///
+    /// ⚠️ **IMPORTANT pour la vision métier :**
+    /// - Le participant est ajouté en mode "waiting" (spectateur)
+    /// - Le GPS n'est PAS activé automatiquement
+    /// - L'utilisateur doit cliquer sur "Démarrer" pour tracker
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session à rejoindre
+    ///   - userId: ID de l'utilisateur qui rejoint
+    /// - Throws: Erreur Firestore si l'opération échoue
     func joinSession(sessionId: String, userId: String) async throws {
         let sessionRef = db.collection("sessions").document(sessionId)
         
         // 🚀 Fire-and-forget pour l'ajout du participant
-        Task.detached {
+        Task { @MainActor in
             do {
                 try await sessionRef.updateData([
                     "participants": FieldValue.arrayUnion([userId]),
-                    // 🆕 Initialiser l'état du nouveau participant comme "waiting"
+                    // 🆕 Initialiser l'état du nouveau participant comme "waiting" (spectateur)
                     "participantStates.\(userId).status": ParticipantStatus.waiting.rawValue,
+                    // 🆕 Initialiser l'activité du participant (spectateur, pas de tracking)
+                    "participantActivity.\(userId).lastUpdate": FieldValue.serverTimestamp(),
+                    "participantActivity.\(userId).isTracking": false,
                     "updatedAt": FieldValue.serverTimestamp()
                 ])
                 Logger.log("✅ Participant ajouté à la session", category: .service)
@@ -144,7 +178,7 @@ class SessionService {
         }
         
         // Stats initiales pour le participant (en arrière-plan aussi)
-        Task.detached {
+        Task { @MainActor in
             let statsRef = sessionRef.collection("participantStats").document(userId)
             let stats = ParticipantStats(
                 userId: userId,
@@ -163,7 +197,7 @@ class SessionService {
         let sessionRef = db.collection("sessions").document(sessionId)
         
         // 🚀 Fire-and-forget
-        Task.detached {
+        Task { @MainActor in
             try? await sessionRef.updateData([
                 "participants": FieldValue.arrayRemove([userId]),
                 "updatedAt": FieldValue.serverTimestamp()
@@ -173,7 +207,7 @@ class SessionService {
     
     func pauseSession(sessionId: String) async throws {
         // 🚀 Fire-and-forget
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             try? await self?.db.collection("sessions").document(sessionId).updateData([
                 "status": SessionStatus.paused.rawValue,
                 "updatedAt": FieldValue.serverTimestamp()
@@ -183,7 +217,7 @@ class SessionService {
     
     func resumeSession(sessionId: String) async throws {
         // 🚀 Fire-and-forget
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             try? await self?.db.collection("sessions").document(sessionId).updateData([
                 "status": SessionStatus.active.rawValue,
                 "updatedAt": FieldValue.serverTimestamp()
@@ -426,6 +460,121 @@ class SessionService {
         Logger.log("✅ Participant \(userId) a repris", category: .session)
     }
     
+    // MARK: - Heartbeat & Activity Tracking
+    
+    /// 🆕 Met à jour le heartbeat d'un participant (tracking actif)
+    ///
+    /// À appeler périodiquement (ex: toutes les 10s) par le TrackingManager
+    /// pour indiquer que le participant est toujours actif.
+    ///
+    /// **Important :** Un coureur immobile qui envoie GPS/BPM reste actif.
+    /// Seule l'absence totale de signal pendant > 60s déclenche l'inactivité.
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur
+    ///   - location: Position GPS actuelle (optionnelle)
+    ///   - heartRate: BPM actuel (optionnel)
+    /// - Throws: `SessionError` si la session n'existe pas
+    func updateParticipantHeartbeat(
+        sessionId: String,
+        userId: String,
+        location: GeoPoint? = nil,
+        heartRate: Double? = nil
+    ) async throws {
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        var updateData: [String: Any] = [
+            "participantActivity.\(userId).lastUpdate": FieldValue.serverTimestamp(),
+            "participantActivity.\(userId).isTracking": true,
+            "updatedAt": FieldValue.serverTimestamp()
+        ]
+        
+        if let location = location {
+            updateData["participantActivity.\(userId).lastLocation"] = location
+        }
+        
+        if let heartRate = heartRate {
+            updateData["participantActivity.\(userId).lastHeartRate"] = heartRate
+        }
+        
+        try await sessionRef.updateData(updateData)
+        
+        // Logger verbose désactivé pour ne pas polluer les logs (appelé toutes les 10s)
+        // Logger.log("💓 Heartbeat mis à jour pour \(userId)", category: .session)
+    }
+    
+    /// 🆕 Met à jour l'activité d'un spectateur (pas de tracking)
+    ///
+    /// Indique qu'un utilisateur est présent dans la session mais ne tracke pas.
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur spectateur
+    /// - Throws: `SessionError` si la session n'existe pas
+    func updateSpectatorActivity(
+        sessionId: String,
+        userId: String
+    ) async throws {
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        try await sessionRef.updateData([
+            "participantActivity.\(userId).lastUpdate": FieldValue.serverTimestamp(),
+            "participantActivity.\(userId).isTracking": false,
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        Logger.log("👁️ Spectateur \(userId) mis à jour", category: .session)
+    }
+    
+    /// 🆕 Détecte et marque les participants inactifs (> 60s sans signal)
+    ///
+    /// À appeler périodiquement (ex: toutes les 30s) par un timer ou une Cloud Function.
+    /// Si le dernier coureur actif devient inactif, termine automatiquement la session.
+    ///
+    /// - Parameter sessionId: ID de la session à vérifier
+    /// - Throws: `SessionError` si la session n'existe pas
+    func checkInactiveParticipants(sessionId: String) async throws {
+        Logger.log("🔍 Vérification des participants inactifs: \(sessionId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        let document = try await sessionRef.getDocument()
+        
+        guard let session = try? document.data(as: SessionModel.self) else {
+            throw SessionError.invalidSession
+        }
+        
+        // Obtenir la liste des participants inactifs
+        let inactiveIds = session.inactiveParticipantIds
+        
+        if !inactiveIds.isEmpty {
+            Logger.log("⚠️ Participants inactifs détectés: \(inactiveIds)", category: .session)
+            
+            // Marquer chaque participant inactif comme "abandonné"
+            for userId in inactiveIds {
+                // Vérifier s'il était en tracking
+                if session.participantActivity(for: userId)?.isTracking == true {
+                    Logger.log("❌ Participant \(userId) marqué comme abandonné (inactivité)", category: .session)
+                    
+                    try? await sessionRef.updateData([
+                        "participantStates.\(userId).status": ParticipantStatus.abandoned.rawValue,
+                        "participantStates.\(userId).endedAt": FieldValue.serverTimestamp()
+                    ])
+                }
+            }
+        }
+        
+        // Vérifier si tous les participants tracking sont inactifs
+        if session.allTrackingParticipantsInactive {
+            Logger.log("🏁 Tous les participants tracking sont inactifs → fin automatique", category: .session)
+            try await endSession(sessionId: sessionId)
+        } else {
+            let activeCount = session.activeTrackingParticipantsCount
+            let spectatorCount = session.spectatorCount
+            Logger.log("ℹ️ Session continue : \(activeCount) coureur(s), \(spectatorCount) spectateur(s)", category: .session)
+        }
+    }
+    
     /// 🆕 Vérifie si tous les participants ont fini et termine la session si nécessaire
     ///
     /// Appelé automatiquement après qu'un participant termine ou abandonne.
@@ -444,14 +593,14 @@ class SessionService {
             throw SessionError.invalidSession
         }
         
-        // Vérifier si tous les participants ont fini
-        if session.canBeEnded {
-            Logger.log("✅ Tous les participants ont terminé, fin automatique de session", category: .session)
+        // 🆕 Utiliser la nouvelle logique avec heartbeat
+        if session.allTrackingParticipantsInactive {
+            Logger.log("✅ Tous les participants tracking sont inactifs, fin automatique de session", category: .session)
             try await endSession(sessionId: sessionId)
         } else {
-            let activeCount = session.activeParticipantsCount
-            let pausedCount = session.pausedParticipantsCount
-            Logger.log("ℹ️ Session continue : \(activeCount) actif(s), \(pausedCount) en pause", category: .session)
+            let activeCount = session.activeTrackingParticipantsCount
+            let spectatorCount = session.spectatorCount
+            Logger.log("ℹ️ Session continue : \(activeCount) coureur(s), \(spectatorCount) spectateur(s)", category: .session)
         }
     }
     
@@ -487,7 +636,7 @@ class SessionService {
             Logger.log("⚠️ Session corrompue, suppression en arrière-plan", category: .session)
             
             // Fire-and-forget : Supprimer en arrière-plan sans bloquer
-            Task.detached {
+            Task { @MainActor in
                 do {
                     try await sessionRef.delete()
                     Logger.log("✅ Session corrompue supprimée", category: .session)
@@ -507,7 +656,7 @@ class SessionService {
         
         // 🚀 OPTIMISATION 2: Fire-and-forget pour la mise à jour Firestore
         // On lance l'opération SANS attendre la réponse
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             do {
                 try await sessionRef.updateData([
                     "status": SessionStatus.ended.rawValue,
@@ -545,7 +694,7 @@ class SessionService {
         maxSpeed: Double
     ) async throws {
         // 🚀 Fire-and-forget - Ne pas bloquer
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             let statsRef = self?.db.collection("sessions")
                 .document(sessionId)
                 .collection("participantStats")
@@ -569,7 +718,7 @@ class SessionService {
         stats: ParticipantStats
     ) async throws {
         // 🚀 Fire-and-forget - Ne pas bloquer
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             let statsRef = self?.db.collection("sessions")
                 .document(sessionId)
                 .collection("participantStats")
@@ -617,7 +766,7 @@ class SessionService {
         averageSpeed: Double
     ) async throws {
         // 🚀 Fire-and-forget
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             try? await self?.db.collection("sessions").document(sessionId).updateData([
                 "totalDistanceMeters": totalDistance,
                 "averageSpeed": averageSpeed,
@@ -630,7 +779,7 @@ class SessionService {
     /// 🚀 Version fire-and-forget pour ne pas bloquer l'UI
     func updateSessionDuration(sessionId: String, duration: TimeInterval) async throws {
         // 🚀 Fire-and-forget
-        Task.detached { [weak self] in
+        Task { @MainActor [weak self] in
             try? await self?.db.collection("sessions").document(sessionId).updateData([
                 "durationSeconds": duration,
                 "updatedAt": FieldValue.serverTimestamp()
@@ -841,7 +990,7 @@ class SessionService {
     
     /// Récupère toutes les sessions (actives + historique) d'un squad
     func getAllSessions(squadId: String, limit: Int = 100) async throws -> [SessionModel] {
-        Logger.log("📚 Récupération toutes sessions pour squad: \(squadId)", category: .service)
+        Logger.log("[AUDIT-SS-01] 📚 SessionService.getAllSessions - squadId: \(squadId)", category: .service)
         
         let query = db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
@@ -852,6 +1001,37 @@ class SessionService {
         let sessions = snapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
         
         Logger.logSuccess("✅ \(sessions.count) sessions totales récupérées", category: .service)
+        return sessions
+    }
+    
+    /// 🆕 Récupère toutes les sessions actives pour un utilisateur (tous ses squads)
+    func getAllActiveSessions(userId: String) async throws -> [SessionModel] {
+        Logger.log("[AUDIT-SS-02] 🌍 SessionService.getAllActiveSessions - userId: \(userId)", category: .service)
+        
+        // 1. Récupérer tous les squads de l'utilisateur
+        let squadsSnapshot = try await db.collection("squads")
+            .whereField("members.\(userId)", isNotEqualTo: NSNull())
+            .getDocuments()
+        
+        let squadIds = squadsSnapshot.documents.compactMap { $0.documentID }
+        
+        guard !squadIds.isEmpty else {
+            Logger.log("⚠️ Aucun squad trouvé pour cet utilisateur", category: .service)
+            return []
+        }
+        
+        Logger.log("🔍 Recherche de sessions actives dans \(squadIds.count) squads", category: .service)
+        
+        // 2. Récupérer toutes les sessions actives de ces squads
+        let sessionsSnapshot = try await db.collection("sessions")
+            .whereField("squadId", in: squadIds)
+            .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+            .order(by: "startedAt", descending: true)
+            .getDocuments()
+        
+        let sessions = sessionsSnapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
+        
+        Logger.logSuccess("✅ \(sessions.count) sessions actives trouvées", category: .service)
         return sessions
     }
 

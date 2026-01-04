@@ -266,7 +266,7 @@ struct DetailedActiveSessionCard: View {
                 // Stats de la session
                 HStack(spacing: 16) {
                     SessionStat(icon: "location.fill", value: String(format: "%.2f km", session.distanceInKilometers))
-                    SessionStat(icon: "clock.fill", value: formatDuration(session.durationSeconds))
+                    SessionStat(icon: "clock.fill", value: formatDuration(session.durationSeconds ?? 0))
                     SessionStat(icon: "person.3.fill", value: "\(session.participants.count)")
                     
                     Spacer()
@@ -306,7 +306,8 @@ struct DetailedActiveSessionCard: View {
         .buttonStyle(.plain)
         .sheet(isPresented: $showDetail) {
             NavigationStack {
-                ActiveSessionDetailView(session: session)
+                // ✅ FIX: Utiliser SessionDetailView au lieu de ActiveSessionDetailView
+                SessionDetailView(session: session)
             }
         }
     }

@@ -10,6 +10,7 @@ import Foundation
 import CoreLocation
 import Combine
 import HealthKit
+import FirebaseFirestore  // 🆕 Pour FieldValue
 
 /// État du tracking de la session
 enum TrackingState: Equatable {
@@ -54,6 +55,9 @@ class TrackingManager: ObservableObject {
     /// Tracé GPS complet de la session
     @Published private(set) var routeCoordinates: [CLLocationCoordinate2D] = []
     
+    /// 🆕 Tracés GPS des autres participants (pour les supporters)
+    @Published private(set) var otherRunnersRoutes: [String: [CLLocationCoordinate2D]] = [:]
+    
     /// Indique si on peut démarrer un tracking
     var canStartTracking: Bool {
         trackingState == .idle
@@ -85,9 +89,13 @@ class TrackingManager: ObservableObject {
     // Position précédente pour calculer la distance
     private var lastLocation: CLLocationCoordinate2D?
     
-    // Sauvegarde automatique toutes les 3 minutes
-    private var autoSaveTimer: Timer?
-    private let autoSaveInterval: TimeInterval = 180  // 3 minutes = 180 secondes
+    // 🆕 Sauvegarde automatique moderne avec Task
+    private var autoSaveTask: Task<Void, Never>?
+    private let autoSaveInterval: TimeInterval = 10  // 🎯 10 secondes pour feedback temps réel
+    
+    // 🆕 Buffer de points à sauvegarder
+    private var pendingRoutePoints: [CLLocationCoordinate2D] = []
+    private let pointsLock = NSLock()
     
     // Observation de la localisation
     private var cancellables = Set<AnyCancellable>()
@@ -104,7 +112,7 @@ class TrackingManager: ObservableObject {
     /// - Parameter session: La session à tracker
     /// - Returns: `true` si le tracking a démarré, `false` sinon
     func startTracking(for session: SessionModel) async -> Bool {
-        Logger.log("🚀 Demande de démarrage tracking pour session: \(session.id ?? "unknown")", category: .location)
+        Logger.log("[AUDIT-TM-01] 🚀 TrackingManager.startTracking appelé - sessionId: \(session.id ?? "unknown")", category: .location)
         
         // Vérifier qu'on peut démarrer
         guard canStartTracking else {
@@ -122,9 +130,9 @@ class TrackingManager: ObservableObject {
             return false
         }
         
-        // Initialiser l'état
+        // Initialiser l'état LOCAL IMMÉDIATEMENT
         activeTrackingSession = session
-        trackingState = .active
+        trackingState = .active  // ✅ État local actif AVANT Firebase
         sessionStartTime = Date()
         currentDistance = 0
         currentDuration = 0
@@ -133,9 +141,58 @@ class TrackingManager: ObservableObject {
         lastLocation = nil
         routeCoordinates = []
         
-        // Démarrer les services
+        // 🆕 Vider le buffer de points
+        pointsLock.lock()
+        pendingRoutePoints.removeAll()
+        pointsLock.unlock()
+        
+        Logger.log("[AUDIT-TM-SEED-01] 🔄 État local passé à .active", category: .location)
+        
+        // 🎯 FIX SAUT VISUEL : Charger l'historique AVANT de démarrer le tracking live
+        do {
+            Logger.log("[AUDIT-TM-SEED-02] 📥 Chargement de l'historique...", category: .location)
+            let (coordinates, timestamps) = try await routeService.loadRouteWithTimestamps(
+                sessionId: sessionId,
+                userId: userId
+            )
+            
+            if !coordinates.isEmpty {
+                // Seeder le service (pré-remplir la liste en mémoire)
+                routeService.seedRoute(coordinates, timestamps: timestamps)
+                
+                // 🎯 CRITIQUE : Synchroniser routeCoordinates avec l'historique
+                routeCoordinates = routeService.getCurrentRoute()
+                
+                Logger.logSuccess("[AUDIT-TM-SEED-03] ✅ Historique seedé: \(coordinates.count) points, routeCoordinates: \(routeCoordinates.count)", category: .location)
+            } else {
+                Logger.log("[AUDIT-TM-SEED-04] ℹ️ Aucun historique (nouvelle session)", category: .location)
+                // Vider le RouteTrackingService seulement si pas d'historique
+                routeService.clearRoute()
+            }
+        } catch {
+            Logger.log("[AUDIT-TM-SEED-05] ⚠️ Chargement historique échoué (probablement nouvelle session): \(error)", category: .location)
+            // Si le chargement échoue, c'est probablement une nouvelle session
+            routeService.clearRoute()
+        }
+        
+        // Démarrer les services de tracking live
         locationProvider.startUpdating()
-        routeService.clearRoute()
+        
+        // 🎯 Configurer la précision GPS pour la course à pied
+        locationProvider.desiredAccuracy = kCLLocationAccuracyBestForNavigation
+        locationProvider.distanceFilter = 10  // 10 mètres entre chaque point
+        
+        // 🆕 Activer la session dans Firebase (SCHEDULED → ACTIVE) - PREMIER APPEL
+        do {
+            try await sessionService.updateSessionFields(sessionId: sessionId, fields: [
+                "status": SessionStatus.active.rawValue,
+                "startedAt": FieldValue.serverTimestamp()
+            ])
+            Logger.logSuccess("✅ Session activée dans Firebase (SCHEDULED → ACTIVE)", category: .session)
+        } catch {
+            Logger.logError(error, context: "Activation session Firebase", category: .session)
+            // ⚠️ Même si Firebase échoue, on continue le tracking localement
+        }
         
         // Démarrer HealthKit
         if healthKitManager.isAvailable {
@@ -151,8 +208,8 @@ class TrackingManager: ObservableObject {
             }
         }
         
-        // Démarrer la sauvegarde automatique (toutes les 3 minutes)
-        startAutoSave(sessionId: sessionId, userId: userId)
+        // 🆕 Démarrer la boucle de sauvegarde automatique moderne (10s)
+        startAutoSaveLoop(sessionId: sessionId, userId: userId)
         
         // Observer les mises à jour de localisation
         observeLocationUpdates()
@@ -168,7 +225,7 @@ class TrackingManager: ObservableObject {
     
     /// Met le tracking en pause
     func pauseTracking() async {
-        Logger.log("⏸️ Pause du tracking", category: .location)
+        Logger.log("[AUDIT-TM-02] ⏸️ TrackingManager.pauseTracking appelé", category: .location)
         
         guard trackingState == .active else {
             Logger.log("⚠️ Tracking pas actif, pause impossible", category: .location)
@@ -180,7 +237,7 @@ class TrackingManager: ObservableObject {
         
         // Arrêter les timers
         durationTimer?.invalidate()
-        autoSaveTimer?.invalidate()
+        autoSaveTask?.cancel()  // 🆕 Annuler la Task de sauvegarde
         
         // Arrêter les updates GPS (économie batterie)
         locationProvider.stopUpdating()
@@ -200,7 +257,7 @@ class TrackingManager: ObservableObject {
     
     /// Reprend le tracking après une pause
     func resumeTracking() async {
-        Logger.log("▶️ Reprise du tracking", category: .location)
+        Logger.log("[AUDIT-TM-03] ▶️ TrackingManager.resumeTracking appelé", category: .location)
         
         guard trackingState == .paused else {
             Logger.log("⚠️ Tracking pas en pause, reprise impossible", category: .location)
@@ -221,7 +278,7 @@ class TrackingManager: ObservableObject {
         
         if let sessionId = activeTrackingSession?.id,
            let userId = AuthService.shared.currentUserId {
-            startAutoSave(sessionId: sessionId, userId: userId)
+            startAutoSaveLoop(sessionId: sessionId, userId: userId)  // 🆕 Relancer la boucle
             
             // Mettre à jour le statut dans Firestore
             try? await sessionService.resumeSession(sessionId: sessionId)
@@ -234,56 +291,65 @@ class TrackingManager: ObservableObject {
     
     /// Arrête le tracking et sauvegarde la session
     func stopTracking() async throws {
-        Logger.log("🛑 Arrêt du tracking", category: .location)
+        Logger.log("[AUDIT-TM-04] 🛑 TrackingManager.stopTracking appelé", category: .location)
         
         guard trackingState == .active || trackingState == .paused else {
-            Logger.log("⚠️ Aucun tracking actif à arrêter", category: .location)
+            Logger.log("[AUDIT-TM-STOP-01] ⚠️ Aucun tracking actif à arrêter (état: \(trackingState.displayName))", category: .location)
             return
         }
         
         guard let session = activeTrackingSession else {
-            Logger.log("⚠️ Aucune session active", category: .location)
+            Logger.log("[AUDIT-TM-STOP-02] ⚠️ Aucune session active", category: .location)
             return
         }
         
         guard let sessionId = session.id else {
-            Logger.log("❌ Session ID manquant", category: .location)
+            Logger.log("[AUDIT-TM-STOP-03] ❌ Session ID manquant", category: .location)
             throw TrackingError.invalidSession
         }
         
-        guard let userId = AuthService.shared.currentUserId else {
-            Logger.log("❌ User ID manquant", category: .location)
-            throw TrackingError.userNotAuthenticated
-        }
-        
+        Logger.log("[AUDIT-TM-STOP-04] 🔄 Passage à l'état .stopping", category: .location)
         trackingState = .stopping
         
         // 1. Arrêter tous les services
+        Logger.log("[AUDIT-TM-STOP-05] ⏸️ Arrêt des services (timer, GPS, etc.)", category: .location)
         durationTimer?.invalidate()
-        autoSaveTimer?.invalidate()
+        autoSaveTask?.cancel()
         locationProvider.stopUpdating()
         
         // 2. Arrêter HealthKit
+        Logger.log("[AUDIT-TM-STOP-06] ❤️ Arrêt HealthKit", category: .location)
         healthKitManager.stopHeartRateQuery()
         do {
             try await healthKitManager.endWorkout()
-            Logger.logSuccess("✅ HealthKit workout terminé", category: .health)
+            Logger.logSuccess("[AUDIT-TM-STOP-07] ✅ HealthKit workout terminé", category: .health)
         } catch {
             Logger.logError(error, context: "endWorkout", category: .health)
         }
         
         // 3. Sauvegarder une dernière fois
-        Logger.log("💾 Sauvegarde finale...", category: .location)
+        Logger.log("[AUDIT-TM-STOP-08] 💾 Sauvegarde finale...", category: .location)
         await saveCurrentState()
+        Logger.log("[AUDIT-TM-STOP-09] ✅ Sauvegarde finale terminée", category: .location)
         
         // 4. Attendre 2 secondes pour que toutes les écritures se terminent
+        Logger.log("[AUDIT-TM-STOP-10] ⏳ Attente 2 secondes...", category: .location)
         try? await Task.sleep(nanoseconds: 2_000_000_000)
+        Logger.log("[AUDIT-TM-STOP-11] ✅ Attente terminée", category: .location)
         
         // 5. Terminer la session dans Firestore
-        Logger.log("🏁 Terminaison de la session dans Firestore...", category: .location)
-        try await sessionService.endSession(sessionId: sessionId)
+        Logger.log("[AUDIT-TM-STOP-12] 🏁 Terminaison de la session dans Firestore...", category: .location)
+        do {
+            try await sessionService.endSession(sessionId: sessionId)
+            Logger.logSuccess("[AUDIT-TM-STOP-13] ✅ Session terminée dans Firestore", category: .location)
+        } catch {
+            Logger.logError(error, context: "sessionService.endSession", category: .location)
+            // ⚠️ Ne pas bloquer le nettoyage même si Firestore échoue
+            Logger.log("[AUDIT-TM-STOP-14] ⚠️ Firestore échoué, on continue le nettoyage local", category: .location)
+        }
         
         // 6. Nettoyer l'état
+        Logger.log("[AUDIT-TM-STOP-15] 🗑️ Nettoyage de l'état local", category: .location)
         trackingState = .idle
         activeTrackingSession = nil
         routeCoordinates = []
@@ -295,7 +361,57 @@ class TrackingManager: ObservableObject {
         totalPausedDuration = 0
         cancellables.removeAll()
         
-        Logger.logSuccess("✅ Tracking arrêté et session sauvegardée", category: .location)
+        Logger.logSuccess("[AUDIT-TM-STOP-16] ✅✅ Tracking complètement arrêté", category: .location)
+    }
+    
+    // MARK: - 🆕 Load Routes (For Supporters)
+    
+    /// Charge le tracé GPS d'un participant depuis Firebase
+    /// 🎯 Utilisé par les supporters pour voir le parcours des coureurs
+    func loadRoute(sessionId: String, userId: String) async {
+        Logger.log("📥 Chargement du tracé pour userId: \(userId)", category: .location)
+        
+        do {
+            let coordinates = try await routeService.loadRoute(sessionId: sessionId, userId: userId)
+            
+            if coordinates.isEmpty {
+                Logger.log("⚠️ Aucun point GPS trouvé pour ce coureur", category: .location)
+                return
+            }
+            
+            // Si c'est notre propre tracé, le mettre dans routeCoordinates
+            if userId == AuthService.shared.currentUserId {
+                routeCoordinates = coordinates
+                Logger.logSuccess("✅ Mon tracé chargé: \(coordinates.count) points", category: .location)
+            } else {
+                // Sinon, dans otherRunnersRoutes
+                otherRunnersRoutes[userId] = coordinates
+                Logger.logSuccess("✅ Tracé de \(userId) chargé: \(coordinates.count) points", category: .location)
+            }
+        } catch {
+            Logger.logError(error, context: "loadRoute", category: .location)
+        }
+    }
+    
+    /// Charge tous les tracés d'une session (pour les supporters)
+    func loadAllRoutes(sessionId: String) async {
+        Logger.log("📥 Chargement de tous les tracés de la session...", category: .location)
+        
+        do {
+            let allRoutes = try await routeService.loadAllRoutes(sessionId: sessionId)
+            
+            for (userId, coordinates) in allRoutes {
+                if userId == AuthService.shared.currentUserId {
+                    routeCoordinates = coordinates
+                } else {
+                    otherRunnersRoutes[userId] = coordinates
+                }
+            }
+            
+            Logger.logSuccess("✅ \(allRoutes.count) tracés chargés", category: .location)
+        } catch {
+            Logger.logError(error, context: "loadAllRoutes", category: .location)
+        }
     }
     
     // MARK: - Private Methods
@@ -316,9 +432,20 @@ class TrackingManager: ObservableObject {
     private func handleNewLocation(_ coordinate: CLLocationCoordinate2D) async {
         guard trackingState == .active else { return }
         
-        // Ajouter au tracé
-        routeCoordinates.append(coordinate)
+        Logger.log("[AUDIT-TM-LIVE-01] 📍 handleNewLocation → lat: \(coordinate.latitude), lon: \(coordinate.longitude)", category: .location)
+        
+        // Ajouter au RouteTrackingService (source unique de vérité)
         routeService.addRoutePoint(coordinate)
+        
+        // 🎯 SYNCHRONISER depuis RouteTrackingService (pas append direct)
+        routeCoordinates = routeService.getCurrentRoute()
+        
+        Logger.log("[AUDIT-TM-LIVE-02] 📊 routeCoordinates synchronisé → count: \(routeCoordinates.count)", category: .location)
+        
+        // 🆕 Ajouter au buffer de sauvegarde
+        pointsLock.lock()
+        pendingRoutePoints.append(coordinate)
+        pointsLock.unlock()
         
         // Calculer la distance si on a une position précédente
         if let lastLocation = lastLocation {
@@ -335,11 +462,10 @@ class TrackingManager: ObservableObject {
         
         lastLocation = coordinate
         
-        // Publier la position dans Firestore (temps réel)
+        // Publier la position dans Firestore (temps réel) - Fire-and-forget
         if let sessionId = activeTrackingSession?.id,
            let userId = AuthService.shared.currentUserId {
-            // Fire-and-forget pour ne pas bloquer
-            Task.detached { @MainActor in
+            Task.detached {
                 let repository = RealtimeLocationRepository()
                 try? await repository.publishLocation(
                     sessionId: sessionId,
@@ -347,6 +473,133 @@ class TrackingManager: ObservableObject {
                     coordinate: coordinate
                 )
             }
+        }
+    }
+    
+    // MARK: - 🆕 Auto-Save Loop (Modern Swift Concurrency)
+    
+    /// Démarre la boucle de sauvegarde automatique toutes les 10 secondes
+    /// 🎯 Utilise Swift Concurrency pour une sauvegarde moderne et fiable
+    private func startAutoSaveLoop(sessionId: String, userId: String) {
+        // Annuler la Task précédente si existante
+        autoSaveTask?.cancel()
+        
+        autoSaveTask = Task { @MainActor in
+            Logger.log("🔄 Boucle de sauvegarde automatique démarrée (toutes les \(Int(autoSaveInterval))s)", category: .location)
+            
+            while !Task.isCancelled && trackingState == .active {
+                // Attendre 10 secondes
+                do {
+                    try await Task.sleep(nanoseconds: UInt64(autoSaveInterval * 1_000_000_000))
+                } catch {
+                    // Task annulée
+                    break
+                }
+                
+                // Vérifier qu'on est toujours actif
+                guard !Task.isCancelled && trackingState == .active else {
+                    break
+                }
+                
+                // Sauvegarder les points collectés
+                await saveRoutePointsToFirebase(sessionId: sessionId, userId: userId)
+            }
+            
+            Logger.log("⏸️ Boucle de sauvegarde automatique terminée", category: .location)
+        }
+    }
+    
+    /// Sauvegarde les points GPS collectés dans Firebase
+    private func saveRoutePointsToFirebase(sessionId: String, userId: String) async {
+        // Récupérer les points en attente
+        pointsLock.lock()
+        let pointsToSave = pendingRoutePoints
+        pendingRoutePoints.removeAll()
+        pointsLock.unlock()
+        
+        guard !pointsToSave.isEmpty else {
+            Logger.log("⏭️ Aucun nouveau point à sauvegarder", category: .location)
+            return
+        }
+        
+        Logger.log("⏰ Sauvegarde automatique déclenchée - \(pointsToSave.count) nouveaux points", category: .location)
+        
+        // Sauvegarder via RouteTrackingService
+        do {
+            try await routeService.saveRoute(sessionId: sessionId, userId: userId)
+            Logger.logSuccess("✅ Points GPS sauvegardés: \(pointsToSave.count) points", category: .location)
+            
+            // Mettre à jour les stats en même temps
+            await updateSessionStats(sessionId: sessionId, userId: userId)
+            
+            // 🆕 Mettre à jour le heartbeat (participant toujours actif)
+            await updateHeartbeat(sessionId: sessionId, userId: userId)
+        } catch {
+            Logger.logError(error, context: "saveRoutePointsToFirebase", category: .location)
+            
+            // ⚠️ Remettre les points dans le buffer en cas d'échec
+            pointsLock.lock()
+            pendingRoutePoints.insert(contentsOf: pointsToSave, at: 0)
+            pointsLock.unlock()
+        }
+    }
+    
+    /// 🆕 Met à jour le heartbeat du participant pour indiquer qu'il est toujours actif
+    private func updateHeartbeat(sessionId: String, userId: String) async {
+        // Récupérer la position et le BPM actuels
+        let location: GeoPoint? = {
+            guard let coord = lastLocation else { return nil }
+            return GeoPoint(latitude: coord.latitude, longitude: coord.longitude)
+        }()
+        
+        let heartRate = healthKitManager.currentHeartRate
+        
+        do {
+            try await sessionService.updateParticipantHeartbeat(
+                sessionId: sessionId,
+                userId: userId,
+                location: location,
+                heartRate: heartRate
+            )
+            // Logger désactivé pour ne pas polluer (appelé toutes les 10s)
+            // Logger.log("💓 Heartbeat mis à jour", category: .location)
+        } catch {
+            // Erreur silencieuse pour le heartbeat (pas critique)
+            Logger.log("⚠️ Échec mise à jour heartbeat: \(error)", category: .location)
+        }
+    }
+    
+    /// Met à jour les statistiques de la session
+    private func updateSessionStats(sessionId: String, userId: String) async {
+        let averageSpeed = currentDuration > 0 ? currentDistance / currentDuration : 0
+        
+        do {
+            // Stats du participant
+            try await sessionService.updateParticipantStats(
+                sessionId: sessionId,
+                userId: userId,
+                distance: currentDistance,
+                duration: currentDuration,
+                averageSpeed: averageSpeed,
+                maxSpeed: currentSpeed
+            )
+            
+            // Stats de la session
+            try await sessionService.updateSessionStats(
+                sessionId: sessionId,
+                totalDistance: currentDistance,
+                averageSpeed: averageSpeed
+            )
+            
+            // Durée
+            try await sessionService.updateSessionDuration(
+                sessionId: sessionId,
+                duration: currentDuration
+            )
+            
+            Logger.log("📊 Stats mises à jour: \(String(format: "%.2f", currentDistance/1000))km, \(String(format: "%.0f", currentDuration))s", category: .location)
+        } catch {
+            Logger.logError(error, context: "updateSessionStats", category: .location)
         }
     }
     
@@ -366,73 +619,26 @@ class TrackingManager: ObservableObject {
         }
     }
     
-    /// Démarre la sauvegarde automatique toutes les 3 minutes
+    /// ⚠️ DEPRECATED - Ancienne méthode avec Timer (gardée pour compatibilité)
+    @available(*, deprecated, message: "Utiliser startAutoSaveLoop à la place")
     private func startAutoSave(sessionId: String, userId: String) {
-        autoSaveTimer?.invalidate()
-        
-        autoSaveTimer = Timer.scheduledTimer(withTimeInterval: autoSaveInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.saveCurrentState()
-            }
-        }
-        
-        Logger.log("🔄 Auto-sauvegarde activée (toutes les \(Int(autoSaveInterval))s)", category: .location)
+        startAutoSaveLoop(sessionId: sessionId, userId: userId)
     }
     
-    /// Sauvegarde l'état actuel (route + stats)
+    /// Sauvegarde l'état actuel (route + stats) - Utilisé pour la sauvegarde finale
     private func saveCurrentState() async {
         guard let sessionId = activeTrackingSession?.id,
               let userId = AuthService.shared.currentUserId else {
             return
         }
         
-        Logger.log("💾 Sauvegarde de l'état actuel...", category: .location)
+        Logger.log("💾 Sauvegarde finale de l'état actuel...", category: .location)
         
-        // 1. Sauvegarder le tracé GPS
-        do {
-            try await routeService.saveRoute(sessionId: sessionId, userId: userId)
-            Logger.log("✅ Tracé sauvegardé: \(routeCoordinates.count) points", category: .location)
-        } catch {
-            Logger.logError(error, context: "saveRoute", category: .location)
-        }
+        // 1. Sauvegarder tous les points restants
+        await saveRoutePointsToFirebase(sessionId: sessionId, userId: userId)
         
-        // 2. Sauvegarder les stats du participant
-        let averageSpeed = currentDuration > 0 ? currentDistance / currentDuration : 0
-        
-        do {
-            try await sessionService.updateParticipantStats(
-                sessionId: sessionId,
-                userId: userId,
-                distance: currentDistance,
-                duration: currentDuration,
-                averageSpeed: averageSpeed,
-                maxSpeed: currentSpeed
-            )
-            Logger.log("✅ Stats sauvegardées", category: .location)
-        } catch {
-            Logger.logError(error, context: "updateParticipantStats", category: .location)
-        }
-        
-        // 3. Mettre à jour les stats de la session
-        do {
-            try await sessionService.updateSessionStats(
-                sessionId: sessionId,
-                totalDistance: currentDistance,
-                averageSpeed: averageSpeed
-            )
-        } catch {
-            Logger.logError(error, context: "updateSessionStats", category: .location)
-        }
-        
-        // 4. Mettre à jour la durée
-        do {
-            try await sessionService.updateSessionDuration(
-                sessionId: sessionId,
-                duration: currentDuration
-            )
-        } catch {
-            Logger.logError(error, context: "updateSessionDuration", category: .location)
-        }
+        // 2. Mettre à jour les stats une dernière fois
+        await updateSessionStats(sessionId: sessionId, userId: userId)
     }
 }
 

@@ -176,7 +176,8 @@ struct LocationPickerView: View {
                                     .font(.subheadline.bold())
                                     .foregroundColor(.white)
                                 
-                                if let address = item.placemark.title {
+                                // 🆕 iOS 26 : Utiliser addressRepresentations au lieu de placemark
+                                if let address = getAddressString(from: item) {
                                     Text(address)
                                         .font(.caption)
                                         .foregroundColor(.white.opacity(0.7))
@@ -279,12 +280,26 @@ struct LocationPickerView: View {
     }
     
     private func selectSearchResult(_ item: MKMapItem) {
-        tempCoordinate = item.placemark.coordinate
-        tempLocationName = item.name ?? item.placemark.title ?? "Lieu sélectionné"
+        // Obtenir les coordonnées de manière compatible toutes versions
+        let coordinate: CLLocationCoordinate2D
+        let locationName: String
+        
+        if #available(iOS 26.0, *) {
+            // iOS 26+ : Utiliser les nouvelles APIs
+            coordinate = item.location.coordinate
+            locationName = item.name ?? "Lieu sélectionné"
+        } else {
+            // iOS < 26 : Utiliser placemark (ancien comportement)
+            coordinate = item.placemark.coordinate
+            locationName = item.name ?? item.placemark.name ?? "Lieu sélectionné"
+        }
+        
+        tempCoordinate = coordinate
+        tempLocationName = locationName
         
         // Centrer sur le lieu
         mapPosition = .camera(
-            MapCamera(centerCoordinate: item.placemark.coordinate, distance: 500)
+            MapCamera(centerCoordinate: coordinate, distance: 500)
         )
         
         // Fermer la recherche
@@ -306,6 +321,31 @@ struct LocationPickerView: View {
         selectedLocation = tempLocationName
         
         dismiss()
+    }
+    
+    // MARK: - Helpers
+    
+    /// Extrait l'adresse d'un MKMapItem de manière compatible toutes versions
+    private func getAddressString(from item: MKMapItem) -> String? {
+        if #available(iOS 26.0, *) {
+            // iOS 26+ : Utiliser les nouvelles APIs
+            if let name = item.name {
+                return name
+            }
+            // MKAddress n'a pas de propriétés accessibles directement
+            // On utilise le nom du lieu comme fallback
+            return "Lieu sélectionné"
+        } else {
+            // iOS < 26 : Utiliser placemark (ancien comportement)
+            if let name = item.placemark.name {
+                return name
+            }
+            if let thoroughfare = item.placemark.thoroughfare {
+                return thoroughfare
+            }
+        }
+        
+        return nil
     }
 }
 

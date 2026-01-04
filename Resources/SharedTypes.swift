@@ -10,7 +10,7 @@ import CoreLocation
 
 // MARK: - RunnerLocation
 /// Position d'un runner en temps réel
-struct RunnerLocation: Identifiable, Codable {
+struct RunnerLocation: Identifiable, Codable, Equatable {
     let id: String // User ID
     var displayName: String
     var latitude: Double
@@ -20,6 +20,14 @@ struct RunnerLocation: Identifiable, Codable {
     
     var coordinate: CLLocationCoordinate2D {
         CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+    
+    // MARK: - Equatable
+    static func == (lhs: RunnerLocation, rhs: RunnerLocation) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.latitude == rhs.latitude &&
+        lhs.longitude == rhs.longitude &&
+        lhs.displayName == rhs.displayName
     }
 }
 
@@ -44,5 +52,17 @@ struct Message: Identifiable, Codable {
         case isAudio
         case audioURL
         case sessionId
+    }
+}
+
+// MARK: - CLLocationCoordinate2D Extensions
+
+// Note: On n'ajoute PAS Equatable à CLLocationCoordinate2D car cela peut créer des conflits
+// avec les futures versions d'iOS. À la place, utilisez .onReceive() au lieu de .onChange()
+extension CLLocationCoordinate2D {
+    /// Compare deux coordonnées pour l'égalité
+    /// Alternative safe à Equatable pour éviter les conflits avec Apple
+    func isEqual(to other: CLLocationCoordinate2D) -> Bool {
+        self.latitude == other.latitude && self.longitude == other.longitude
     }
 }

@@ -50,7 +50,7 @@ final class RealtimeLocationService: ObservableObject {
     // MARK: - Contexte
     
     func setContext(squadId: String) {
-        Logger.log("🔧 RealtimeLocationService.setContext appelé avec squadId: \(squadId)", category: .location)
+        Logger.log("[AUDIT-RLS-01] 🔧 RealtimeLocationService.setContext - squadId: \(squadId)", category: .location)
         membershipRepository.setCurrentSquadId(squadId)
         observeActiveSession(for: squadId)
         bindOwnLocation()
@@ -66,10 +66,12 @@ final class RealtimeLocationService: ObservableObject {
     // MARK: - Public API
     
     func startLocationUpdates() {
+        Logger.log("[AUDIT-RLS-02] 📍 RealtimeLocationService.startLocationUpdates appelé", category: .location)
         locationProvider.startUpdating()
     }
     
     func requestOneShotLocation() {
+        Logger.log("[AUDIT-RLS-03] 🎯 RealtimeLocationService.requestOneShotLocation appelé", category: .location)
         locationProvider.requestOneShotLocation()
     }
     
@@ -114,18 +116,28 @@ final class RealtimeLocationService: ObservableObject {
             guard let self else { return }
             // Observe les changements de position via Published
             for await _ in self.locationProvider.$currentCoordinate.values {
+                let coord = self.locationProvider.currentCoordinate
+                
+                Logger.log("[AUDIT-LIVE-03] 🔄 LocationProvider.currentCoordinate changé → \(coord.map { "lat: \($0.latitude), lon: \($0.longitude)" } ?? "nil")", category: .location)
+                
                 await MainActor.run {
-                    self.userCoordinate = self.locationProvider.currentCoordinate
+                    self.userCoordinate = coord
+                    Logger.log("[AUDIT-LIVE-04] 📌 userCoordinate publié → \(coord.map { "lat: \($0.latitude), lon: \($0.longitude)" } ?? "nil")", category: .location)
                 }
+                
                 // Publier la position si session active et userId disponible
                 guard
                     let sessionId = self.activeSession?.id,
                     let userId = AuthService.shared.currentUserId,
-                    let coord = self.locationProvider.currentCoordinate
-                else { continue }
+                    let coord = coord
+                else { 
+                    Logger.log("[AUDIT-LIVE-05] ⚠️ Pas de publication Firestore (session: \(self.activeSession?.id ?? "nil"), userId: \(AuthService.shared.currentUserId ?? "nil"), coord: \(coord != nil))", category: .location)
+                    continue 
+                }
                 
                 do {
                     try await self.repository.publishLocation(sessionId: sessionId, userId: userId, coordinate: coord)
+                    Logger.log("[AUDIT-LIVE-06] ✅ Position publiée dans Firestore", category: .location)
                 } catch {
                     Logger.logError(error, context: "publishLocation", category: .location)
                 }

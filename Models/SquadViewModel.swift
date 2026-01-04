@@ -303,7 +303,7 @@ class SquadViewModel {
         guard let userId = currentUserId else { return }
         
         do {
-            if let updatedUser = try await AuthService.shared.getUserProfile(userId: userId) {
+            if let _ = try await AuthService.shared.getUserProfile(userId: userId) {
                 // Notifier qu'on a besoin de rafraîchir
                 // Le mieux serait d'utiliser NotificationCenter ou un Publisher
                 NotificationCenter.default.post(

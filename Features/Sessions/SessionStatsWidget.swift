@@ -106,7 +106,7 @@ struct SessionStatsWidget: View {
                 icon: "clock.fill",
                 value: timeElapsedFormatted,
                 label: "Temps",
-                color: .blue
+                color: Color.blue
             )
             
             // Distance
@@ -114,7 +114,7 @@ struct SessionStatsWidget: View {
                 icon: "location.fill",
                 value: distanceFormatted,
                 label: "Distance",
-                color: .green
+                color: Color.green
             )
             
             // Fréquence cardiaque
@@ -122,7 +122,7 @@ struct SessionStatsWidget: View {
                 icon: "heart.fill",
                 value: heartRateFormatted,
                 label: "BPM",
-                color: .red
+                color: Color.red
             )
             
             // Calories
@@ -130,7 +130,7 @@ struct SessionStatsWidget: View {
                 icon: "flame.fill",
                 value: caloriesFormatted,
                 label: "Calories",
-                color: .orange
+                color: Color.orange
             )
         }
     }

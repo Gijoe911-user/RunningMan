@@ -37,7 +37,7 @@ struct SquadModel: Identifiable, Codable {
     var members: [String: SquadMemberRole] // [userId: role]
     
     /// Sessions actives de la squad
-    var activeSessions: [String] // Liste des sessionIds actifs
+    var activeSessions: [String]? // Liste des sessionIds actifs (optionnel pour rétrocompatibilité)
     
     /// Statistiques de la squad
     var statistics: SquadStatistics?
@@ -53,7 +53,7 @@ struct SquadModel: Identifiable, Codable {
         createdAt: Date = Date(),
         photoURL: String? = nil,
         members: [String: SquadMemberRole] = [:],
-        activeSessions: [String] = []
+        activeSessions: [String]? = nil
     ) {
         self.id = id
         self.name = name
@@ -130,7 +130,8 @@ extension SquadModel {
     
     /// Indique si la squad a des sessions actives
     var hasActiveSessions: Bool {
-        !activeSessions.isEmpty
+        guard let sessions = activeSessions else { return false }
+        return !sessions.isEmpty
     }
 }
 

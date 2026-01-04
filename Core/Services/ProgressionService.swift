@@ -183,9 +183,9 @@ final class ProgressionService: ObservableObject {
                 
                 switch goalType {
                 case .distance:
-                    value = session.totalDistanceMeters
+                    value = (session.totalDistanceMeters ?? 0)
                 case .duration:
-                    value = session.durationSeconds
+                    value = (session.durationSeconds ?? 0)
                 }
                 
                 // Ajouter la contribution

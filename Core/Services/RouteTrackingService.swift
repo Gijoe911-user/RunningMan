@@ -20,6 +20,8 @@ class RouteTrackingService {
     
     // Tracé en cours (en mémoire)
     private var currentRoutePoints: [CLLocationCoordinate2D] = []
+    // Horodatages correspondants (même index que currentRoutePoints)
+    private var currentRouteTimestamps: [Date] = []
     
     // Timer pour sauvegarde automatique
     private var autoSaveTimer: Timer?
@@ -33,18 +35,45 @@ class RouteTrackingService {
     /// Ajoute un point au tracé en cours
     func addRoutePoint(_ coordinate: CLLocationCoordinate2D) {
         currentRoutePoints.append(coordinate)
-        Logger.log("📍 Point ajouté au tracé: \(currentRoutePoints.count) points", category: .location)
+        currentRouteTimestamps.append(Date()) // Timestamp au moment de la réception de la position
+        Logger.log("[AUDIT-RTS-01] 📍 RouteTrackingService.addRoutePoint - total: \(currentRoutePoints.count)", category: .location)
     }
     
     /// Obtient le tracé en cours
     func getCurrentRoute() -> [CLLocationCoordinate2D] {
+        Logger.log("[AUDIT-RTS-02] 📋 RouteTrackingService.getCurrentRoute - count: \(currentRoutePoints.count)", category: .location)
         return currentRoutePoints
     }
     
     /// Réinitialise le tracé
     func clearRoute() {
         currentRoutePoints.removeAll()
-        Logger.log("🗑️ Tracé réinitialisé", category: .location)
+        currentRouteTimestamps.removeAll()
+        Logger.log("[AUDIT-RTS-03] 🗑️ RouteTrackingService.clearRoute appelé", category: .location)
+    }
+    
+    /// Pré-remplit les listes en mémoire avec un tracé existant SANS écraser ce qui arrive ensuite
+    /// 🎯 Cette méthode permet d'éviter le "saut visuel" en chargeant d'abord l'historique
+    /// avant de commencer le tracking live
+    func seedRoute(_ points: [CLLocationCoordinate2D], timestamps: [Date]) {
+        // Sécurité : Ne seed que si les listes sont vides (pas de tracking en cours)
+        guard currentRoutePoints.isEmpty else {
+            Logger.log("[AUDIT-RTS-SEED] ⚠️ seedRoute ignoré : tracking déjà en cours (\(currentRoutePoints.count) points)", category: .location)
+            return
+        }
+        
+        // Vérifier la cohérence des données
+        let count = min(points.count, timestamps.count)
+        guard count > 0 else {
+            Logger.log("[AUDIT-RTS-SEED] ⚠️ seedRoute : aucun point à seeder", category: .location)
+            return
+        }
+        
+        // Pré-remplir les listes
+        currentRoutePoints = Array(points.prefix(count))
+        currentRouteTimestamps = Array(timestamps.prefix(count))
+        
+        Logger.logSuccess("[AUDIT-RTS-SEED] ✅ Route seedée avec \(count) points historiques", category: .location)
     }
     
     // MARK: - Auto-Save
@@ -100,19 +129,27 @@ class RouteTrackingService {
             return
         }
         
-        Logger.log("💾 Sauvegarde de \(currentRoutePoints.count) points...", category: .location)
+        Logger.log("[AUDIT-RTS-04] 💾 RouteTrackingService.saveRoute - points: \(currentRoutePoints.count)", category: .location)
         
         // Convertir les coordonnées en GeoPoints
         let geoPoints = currentRoutePoints.map { coord in
-            return GeoPoint(latitude: coord.latitude, longitude: coord.longitude)
+            GeoPoint(latitude: coord.latitude, longitude: coord.longitude)
         }
         
-        // Créer un document de tracé
-        let routeData: [String: Any] = [
+        // Construire les timestamps Firestore correspondants
+        // Si pour une raison quelconque les tailles diffèrent, on tronque à la taille minimale
+        let count = min(geoPoints.count, currentRouteTimestamps.count)
+        let safeGeoPoints = Array(geoPoints.prefix(count))
+        let safeTimestamps = Array(currentRouteTimestamps.prefix(count)).map { Timestamp(date: $0) }
+        
+        // Créer un document de tracé enrichi
+        var routeData: [String: Any] = [
             "sessionId": sessionId,
             "userId": userId,
-            "points": geoPoints,
-            "pointsCount": geoPoints.count,
+            "points": safeGeoPoints,
+            "pointsTimestamps": safeTimestamps,
+            "pointsCount": count,
+            "version": 2, // 🆕 Schéma v2 avec timestamps
             "createdAt": FieldValue.serverTimestamp()
         ]
         
@@ -121,14 +158,14 @@ class RouteTrackingService {
             .document("\(sessionId)_\(userId)")
             .setData(routeData)
         
-        Logger.logSuccess("✅ Tracé sauvegardé: \(geoPoints.count) points", category: .location)
+        Logger.logSuccess("✅ Tracé sauvegardé: \(count) points", category: .location)
     }
     
     // MARK: - Load Route from Firestore
     
-    /// Charge un tracé depuis Firestore
+    /// Charge un tracé depuis Firestore (coordonnées seulement, sans timestamps)
     func loadRoute(sessionId: String, userId: String) async throws -> [CLLocationCoordinate2D] {
-        Logger.log("📥 Chargement du tracé...", category: .location)
+        Logger.log("[AUDIT-RTS-05] 📥 RouteTrackingService.loadRoute - sessionId: \(sessionId)", category: .location)
         
         let doc = try await db.collection("routes")
             .document("\(sessionId)_\(userId)")
@@ -146,6 +183,43 @@ class RouteTrackingService {
         
         Logger.logSuccess("✅ Tracé chargé: \(coordinates.count) points", category: .location)
         return coordinates
+    }
+    
+    /// Charge un tracé depuis Firestore avec ses timestamps pour le seeding
+    func loadRouteWithTimestamps(sessionId: String, userId: String) async throws -> (coordinates: [CLLocationCoordinate2D], timestamps: [Date]) {
+        Logger.log("[AUDIT-RTS-06] 📥 RouteTrackingService.loadRouteWithTimestamps - sessionId: \(sessionId)", category: .location)
+        
+        let doc = try await db.collection("routes")
+            .document("\(sessionId)_\(userId)")
+            .getDocument()
+        
+        guard let data = doc.data(),
+              let geoPoints = data["points"] as? [GeoPoint] else {
+            Logger.log("⚠️ Aucun tracé trouvé", category: .location)
+            return ([], [])
+        }
+        
+        let coordinates = geoPoints.map { geoPoint in
+            CLLocationCoordinate2D(latitude: geoPoint.latitude, longitude: geoPoint.longitude)
+        }
+        
+        // Essayer de récupérer les timestamps (version 2)
+        var timestamps: [Date] = []
+        if let firestoreTimestamps = data["pointsTimestamps"] as? [Timestamp] {
+            timestamps = firestoreTimestamps.map { $0.dateValue() }
+        }
+        
+        // Si pas de timestamps ou taille différente, créer des timestamps artificiels espacés de 3 secondes
+        if timestamps.isEmpty || timestamps.count != coordinates.count {
+            Logger.log("⚠️ Timestamps manquants ou incohérents, génération artificielle", category: .location)
+            let baseDate = Date().addingTimeInterval(-Double(coordinates.count) * 3.0)
+            timestamps = (0..<coordinates.count).map { index in
+                baseDate.addingTimeInterval(Double(index) * 3.0)
+            }
+        }
+        
+        Logger.logSuccess("✅ Tracé chargé avec timestamps: \(coordinates.count) points", category: .location)
+        return (coordinates, timestamps)
     }
     
     /// Charge tous les tracés d'une session (tous les participants)
@@ -227,3 +301,4 @@ class RouteTrackingService {
         return fileURL
     }
 }
+

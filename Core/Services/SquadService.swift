@@ -153,10 +153,18 @@ class SquadService {
         let query = squadsRef.whereField("members.\(userId)", isGreaterThan: "")
         let snapshot = try await query.getDocuments()
         
+        Logger.log("📦 Documents Firestore reçus: \(snapshot.documents.count)", category: .squads)
+        
         var squads: [SquadModel] = []
         for document in snapshot.documents {
-            if let squad = try? document.data(as: SquadModel.self) {
+            do {
+                let squad = try document.data(as: SquadModel.self)
                 squads.append(squad)
+                Logger.log("✅ Squad décodée: \(document.documentID)", category: .squads)
+            } catch {
+                Logger.logError(error, context: "Décodage squad \(document.documentID)", category: .squads)
+                // 🆕 Logger le contenu du document pour débugger
+                Logger.log("📄 Données brutes: \(document.data())", category: .squads)
             }
         }
         
@@ -345,12 +353,21 @@ extension SquadService {
                 return
             }
             
+            Task { @MainActor in
+                Logger.log("📦 Listener: \(snapshot.documents.count) documents reçus", category: .squads)
+            }
+            
             let squads: [SquadModel] = snapshot.documents.compactMap { doc in
                 do {
-                    return try doc.data(as: SquadModel.self)
+                    let squad = try doc.data(as: SquadModel.self)
+                    Task { @MainActor in
+                        Logger.log("✅ Squad décodée: \(doc.documentID)", category: .squads)
+                    }
+                    return squad
                 } catch {
                     Task { @MainActor in
                         Logger.logError(error, context: "decode SquadModel \(doc.documentID)", category: .squads)
+                        Logger.log("📄 Données brutes: \(doc.data())", category: .squads)
                     }
                     return nil
                 }

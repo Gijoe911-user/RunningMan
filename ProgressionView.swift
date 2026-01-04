@@ -248,8 +248,6 @@ struct ProgressionView: View {
     
     /// Dégradé de couleurs pour la barre
     private var gradientColors: [Color] {
-        let baseColor = progressionService.getProgressionColor().color
-        
         switch progressionService.getProgressionColor() {
         case .excellent:
             return [.green, .mint]
