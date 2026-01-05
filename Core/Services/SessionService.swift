@@ -242,7 +242,11 @@ class SessionService {
         let snapshot = try await db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
             .whereField("activityType", isEqualTo: ActivityType.race.rawValue)
-            .whereField("status", isEqualTo: SessionStatus.active.rawValue)
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                SessionStatus.paused.rawValue       // ✅ Sessions en pause
+            ])
             .limit(to: 1)
             .getDocuments()
         
@@ -261,7 +265,11 @@ class SessionService {
         let snapshot = try await db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
             .whereField("creatorId", isEqualTo: userId)
-            .whereField("status", isEqualTo: SessionStatus.active.rawValue)
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                SessionStatus.paused.rawValue       // ✅ Sessions en pause
+            ])
             .limit(to: 1)
             .getDocuments()
         
@@ -884,7 +892,11 @@ class SessionService {
         
         let query = db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
-            .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                SessionStatus.paused.rawValue       // ✅ Sessions en pause
+            ])
             .order(by: "startedAt", descending: true)
             .limit(to: 1)
         
@@ -912,7 +924,11 @@ class SessionService {
         AsyncStream { continuation in
             let query = self.db.collection("sessions")
                 .whereField("squadId", isEqualTo: squadId)
-                .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+                .whereField("status", in: [
+                    SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                    SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                    SessionStatus.paused.rawValue       // ✅ Sessions en pause
+                ])
             
             let listener = query.addSnapshotListener { snapshot, _ in
                 let sessions = snapshot?.documents.compactMap { try? $0.data(as: SessionModel.self) } ?? []
@@ -961,7 +977,11 @@ class SessionService {
         return AsyncStream { continuation in
             let query = self.db.collection("sessions")
                 .whereField("squadId", isEqualTo: squadId)
-                .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+                .whereField("status", in: [
+                    SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                    SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                    SessionStatus.paused.rawValue       // ✅ Sessions en pause
+                ])
                 .order(by: "startedAt", descending: true)
                 .limit(to: 1)
             
@@ -976,10 +996,22 @@ class SessionService {
                 
                 if let doc = snapshot?.documents.first {
                     print("📄 Document trouvé: \(doc.documentID)")
+                    print("   🔑 Document ID depuis Firestore: \(doc.documentID)")
                     
                     do {
                         let session = try doc.data(as: SessionModel.self)
-                        print("✅ Session décodée: \(session.id ?? "no-id") - status: \(session.status.rawValue)")
+                        print("✅ Session décodée:")
+                        print("   - ID après décodage: \(session.id ?? "❌ NIL")")
+                        print("   - Document ID: \(doc.documentID)")
+                        print("   - Status: \(session.status.rawValue)")
+                        
+                        if session.id == nil {
+                            print("⚠️⚠️ PROBLÈME : L'ID est NIL après décodage !")
+                            print("   - Firebase a fourni l'ID: \(doc.documentID)")
+                            print("   - Mais @DocumentID ne l'a pas capturé")
+                            print("   - Vérifier SessionModel.CodingKeys")
+                        }
+                        
                         continuation.yield(session)
                     } catch {
                         print("⚠️ Session \(doc.documentID) ignorée (erreur décodage)")
@@ -1053,7 +1085,11 @@ class SessionService {
         
         let query = db.collection("sessions")
             .whereField("squadId", isEqualTo: squadId)
-            .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                SessionStatus.paused.rawValue       // ✅ Sessions en pause
+            ])
             .order(by: "startedAt", descending: true)
         
         let snapshot = try await query.getDocuments()
@@ -1112,15 +1148,20 @@ class SessionService {
         Logger.log("🔍 Recherche de sessions actives dans \(squadIds.count) squads", category: .service)
         
         // 2. Récupérer toutes les sessions actives de ces squads
+        // 🆕 INCLURE SCHEDULED : Une session en attente de démarrage doit être visible
         let sessionsSnapshot = try await db.collection("sessions")
             .whereField("squadId", in: squadIds)
-            .whereField("status", in: [SessionStatus.active.rawValue, SessionStatus.paused.rawValue])
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,  // ✅ Sessions en attente
+                SessionStatus.active.rawValue,      // ✅ Sessions en cours
+                SessionStatus.paused.rawValue       // ✅ Sessions en pause
+            ])
             .order(by: "startedAt", descending: true)
             .getDocuments()
         
         let sessions = sessionsSnapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
         
-        Logger.logSuccess("✅ \(sessions.count) sessions actives trouvées", category: .service)
+        Logger.logSuccess("✅ \(sessions.count) sessions actives trouvées (scheduled/active/paused)", category: .service)
         return sessions
     }
 

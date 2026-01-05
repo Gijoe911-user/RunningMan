@@ -112,7 +112,12 @@ class TrackingManager: ObservableObject {
     /// - Parameter session: La session à tracker
     /// - Returns: `true` si le tracking a démarré, `false` sinon
     func startTracking(for session: SessionModel) async -> Bool {
-        Logger.log("[AUDIT-TM-01] 🚀 TrackingManager.startTracking appelé - sessionId: \(session.id ?? "unknown")", category: .location)
+        Logger.log("[AUDIT-TM-01] 🚀 TrackingManager.startTracking appelé", category: .location)
+        Logger.log("[AUDIT-TM-01-DEBUG] 📋 Session reçue:", category: .location)
+        Logger.log("   - id: \(session.id ?? "NIL")", category: .location)
+        Logger.log("   - squadId: \(session.squadId)", category: .location)
+        Logger.log("   - creatorId: \(session.creatorId)", category: .location)
+        Logger.log("   - status: \(session.status.rawValue)", category: .location)
         
         // Vérifier qu'on peut démarrer
         guard canStartTracking else {
@@ -121,7 +126,9 @@ class TrackingManager: ObservableObject {
         }
         
         guard let sessionId = session.id else {
-            Logger.log("❌ Session ID manquant", category: .location)
+            Logger.log("❌❌ ERREUR CRITIQUE : Session ID est NIL", category: .location)
+            Logger.log("   - Cela signifie que la session n'a pas été chargée depuis Firestore", category: .location)
+            Logger.log("   - Vérifier que la vue passe bien une session avec un ID valide", category: .location)
             return false
         }
         
@@ -129,6 +136,8 @@ class TrackingManager: ObservableObject {
             Logger.log("❌ User ID manquant", category: .location)
             return false
         }
+        
+        Logger.log("✅ Validation OK - sessionId: \(sessionId), userId: \(userId)", category: .location)
         
         // Initialiser l'état LOCAL IMMÉDIATEMENT
         activeTrackingSession = session
@@ -182,16 +191,15 @@ class TrackingManager: ObservableObject {
         locationProvider.desiredAccuracy = kCLLocationAccuracyBestForNavigation
         locationProvider.distanceFilter = 10  // 10 mètres entre chaque point
         
-        // 🆕 Activer la session dans Firebase (SCHEDULED → ACTIVE) - PREMIER APPEL
+        // 🆕 APPELER LA NOUVELLE MÉTHODE startMyTracking() - LE FIX PRINCIPAL
+        Logger.log("[AUDIT-TM-02] 🚀 Appel SessionService.startMyTracking()...", category: .session)
         do {
-            try await sessionService.updateSessionFields(sessionId: sessionId, fields: [
-                "status": SessionStatus.active.rawValue,
-                "startedAt": FieldValue.serverTimestamp()
-            ])
-            Logger.logSuccess("✅ Session activée dans Firebase (SCHEDULED → ACTIVE)", category: .session)
+            try await sessionService.startMyTracking(sessionId: sessionId, userId: userId)
+            Logger.logSuccess("✅✅ startMyTracking() réussi - Session activée dans Firebase", category: .session)
         } catch {
-            Logger.logError(error, context: "Activation session Firebase", category: .session)
+            Logger.logError(error, context: "startMyTracking", category: .session)
             // ⚠️ Même si Firebase échoue, on continue le tracking localement
+            Logger.log("⚠️ Échec Firebase, mais tracking local continue", category: .session)
         }
         
         // Démarrer HealthKit

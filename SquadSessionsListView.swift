@@ -130,8 +130,8 @@ struct SquadSessionsListView: View {
                     emptyActiveSessionsView
                 } else {
                     ForEach(activeSessions.filter { $0.id != nil }) { session in
-                        // ✅ FIX: Utiliser SessionHistoryDetailView en attendant ActiveSessionDetailView
-                        NavigationLink(destination: SessionHistoryDetailView(session: session)) {
+                        // ✅ FIX: Utiliser SessionTrackingView pour les sessions actives
+                        NavigationLink(destination: SessionTrackingView(session: session)) {
                             ActiveSessionCard(session: session)
                         }
                         .buttonStyle(.plain)

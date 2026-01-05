@@ -17,9 +17,15 @@ struct SessionTrackingView: View {
     @State private var showStopConfirmation = false
     @State private var isSpectatorMode = true  // 🆕 Mode spectateur par défaut
     @State private var showStartTrackingConfirmation = false  // 🆕 Confirmation démarrage tracking
+    @State private var showEndSessionConfirmation = false  // 🆕 Confirmation terminer session complète
     @State private var errorMessage: String = ""
     @State private var showError = false
     @Environment(\.dismiss) private var dismiss
+    
+    // 🆕 Vérifier si l'utilisateur est le créateur
+    private var isCreator: Bool {
+        AuthService.shared.currentUserId == session.creatorId
+    }
     
     var body: some View {
         ZStack {
@@ -68,6 +74,19 @@ struct SessionTrackingView: View {
         }
         .navigationTitle("Session en cours")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 🆕 Bouton pour terminer la session complète (réservé au créateur)
+            if isCreator && session.status != .ended {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showEndSessionConfirmation = true
+                    } label: {
+                        Label("Terminer la session", systemImage: "flag.checkered")
+                            .foregroundColor(.coralAccent)
+                    }
+                }
+            }
+        }
         .task {
             // 🆕 MODE SPECTATEUR : Charger les routes existantes SANS démarrer le tracking
             if let sessionId = session.id {
@@ -109,6 +128,16 @@ struct SessionTrackingView: View {
             }
         } message: {
             Text("Votre GPS et HealthKit seront activés pour enregistrer votre parcours.")
+        }
+        .alert("Terminer la session ?", isPresented: $showEndSessionConfirmation) {
+            Button("Annuler", role: .cancel) { }
+            Button("Terminer pour tous", role: .destructive) {
+                Task {
+                    await endCompleteSession()
+                }
+            }
+        } message: {
+            Text("La session sera terminée pour tous les participants. Cette action est irréversible.")
         }
         .alert("Erreur", isPresented: $showError) {
             Button("OK", role: .cancel) { }
@@ -394,8 +423,11 @@ struct SessionTrackingView: View {
                 return
             }
             
-            // OK : Démarrer le tracking
-            let success = await trackingManager.startTracking(for: session)
+            // OK : Démarrer le tracking avec SessionTrackingHelper
+            let success = await SessionTrackingHelper.startTracking(
+                for: session,
+                using: trackingManager
+            )
             
             if success {
                 // Mettre à jour Firestore : participant devient actif
@@ -463,6 +495,43 @@ struct SessionTrackingView: View {
             errorMessage = "Erreur lors de l'arrêt du tracking : \(error.localizedDescription)"
             showError = true
             Logger.logError(error, context: "stopTracking", category: .session)
+        }
+    }
+    
+    /// 🆕 Termine complètement la session (réservé au créateur)
+    private func endCompleteSession() async {
+        Logger.log("[SESSION] 🏁 Fin complète de la session demandée par le créateur", category: .session)
+        
+        guard let sessionId = session.id else {
+            errorMessage = "Session invalide"
+            showError = true
+            return
+        }
+        
+        guard isCreator else {
+            errorMessage = "Seul le créateur peut terminer la session"
+            showError = true
+            return
+        }
+        
+        do {
+            // Arrêter le tracking local si actif
+            if trackingManager.trackingState != .idle {
+                try await trackingManager.stopTracking()
+            }
+            
+            // Terminer la session pour tous via SessionService
+            try await SessionService.shared.endSession(sessionId: sessionId)
+            
+            Logger.logSuccess("[SESSION] ✅ Session terminée pour tous les participants", category: .session)
+            
+            await MainActor.run {
+                dismiss()
+            }
+        } catch {
+            errorMessage = "Erreur lors de la fin de session : \(error.localizedDescription)"
+            showError = true
+            Logger.logError(error, context: "endCompleteSession", category: .session)
         }
     }
 }
