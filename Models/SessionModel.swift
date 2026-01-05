@@ -123,10 +123,153 @@ struct SessionModel: Identifiable, Codable, Hashable {
         self.updatedAt = updatedAt ?? Date()
     }
     
-    // ✅ @DocumentID gère automatiquement l'ID
-    // ✅ Firestore décode/encode automatiquement tous les champs
-    // 🆕 Les nouveaux champs (targetDuration, participantActivity) sont optionnels
-    //     donc pas de crash sur les anciennes données
+    
+    // MARK: - CodingKeys
+    
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case squadId
+        case creatorId
+        case startedAt
+        case endedAt
+        case status
+        case participants
+        case totalDistanceMeters
+        case durationSeconds
+        case averageSpeed
+        case startLocation
+        case messageCount
+        case targetDistanceMeters
+        case targetDuration
+        case title
+        case notes
+        case activityType
+        case trainingProgramId
+        case meetingLocationName
+        case meetingLocationCoordinate
+        case runType
+        case visibility
+        case isJoinable
+        case maxParticipants
+        case participantStates
+        case participantActivity
+        case createdAt
+        case updatedAt
+    }
+    
+    // MARK: - Custom Decoder (Graceful Decoding)
+    
+    /// 🛡️ Décodeur custom ultra-résilient
+    ///
+    /// Utilise `decodeIfPresent` pour TOUS les champs (sauf les 2 essentiels).
+    /// Garantit zéro crash même si Firestore contient des données corrompues.
+    ///
+    /// **Champs strictement requis :**
+    /// - `squadId` : Nécessaire pour identifier la squad
+    /// - `creatorId` : Nécessaire pour les permissions
+    ///
+    /// **Tous les autres champs :** Valeurs par défaut si absents
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // 🔥 Champs strictement requis (crash si absents)
+        squadId = try container.decode(String.self, forKey: .squadId)
+        creatorId = try container.decode(String.self, forKey: .creatorId)
+        
+        // 🆕 TOUS les autres champs utilisent decodeIfPresent
+        // Note: @DocumentID est géré automatiquement par Firestore
+        // On ne le décode PAS manuellement ici
+        
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt) ?? Date()
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        status = try container.decodeIfPresent(SessionStatus.self, forKey: .status) ?? .scheduled
+        participants = try container.decodeIfPresent([String].self, forKey: .participants) ?? []
+        
+        // Statistiques
+        totalDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .totalDistanceMeters)
+        durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
+        averageSpeed = try container.decodeIfPresent(Double.self, forKey: .averageSpeed)
+        startLocation = try container.decodeIfPresent(GeoPoint.self, forKey: .startLocation)
+        messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount)
+        
+        // Champs optionnels
+        targetDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .targetDistanceMeters)
+        targetDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .targetDuration)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        activityType = try container.decodeIfPresent(ActivityType.self, forKey: .activityType) ?? .training
+        
+        // Programme et localisation
+        trainingProgramId = try container.decodeIfPresent(String.self, forKey: .trainingProgramId)
+        meetingLocationName = try container.decodeIfPresent(String.self, forKey: .meetingLocationName)
+        meetingLocationCoordinate = try container.decodeIfPresent(GeoPoint.self, forKey: .meetingLocationCoordinate)
+        
+        // Nouveaux champs Refonte Incrément 3
+        runType = try container.decodeIfPresent(RunType.self, forKey: .runType)
+        visibility = try container.decodeIfPresent(SessionVisibility.self, forKey: .visibility)
+        isJoinable = try container.decodeIfPresent(Bool.self, forKey: .isJoinable)
+        maxParticipants = try container.decodeIfPresent(Int.self, forKey: .maxParticipants)
+        
+        // États des participants
+        participantStates = try container.decodeIfPresent([String: ParticipantSessionState].self, forKey: .participantStates)
+        participantActivity = try container.decodeIfPresent([String: ParticipantActivity].self, forKey: .participantActivity)
+        
+        // Timestamps
+        createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt) ?? Date()
+    }
+    
+    // MARK: - Custom Encoder
+    
+    /// Encodeur custom pour synchroniser avec le décodeur
+    ///
+    /// Encode tous les champs (sauf `id` qui est géré par @DocumentID)
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        // Note: @DocumentID gère automatiquement l'encodage de `id`
+        // On ne l'encode PAS manuellement
+        
+        try container.encode(squadId, forKey: .squadId)
+        try container.encode(creatorId, forKey: .creatorId)
+        try container.encode(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(endedAt, forKey: .endedAt)
+        try container.encode(status, forKey: .status)
+        try container.encode(participants, forKey: .participants)
+        
+        // Statistiques
+        try container.encodeIfPresent(totalDistanceMeters, forKey: .totalDistanceMeters)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+        try container.encodeIfPresent(averageSpeed, forKey: .averageSpeed)
+        try container.encodeIfPresent(startLocation, forKey: .startLocation)
+        try container.encodeIfPresent(messageCount, forKey: .messageCount)
+        
+        // Champs optionnels
+        try container.encodeIfPresent(targetDistanceMeters, forKey: .targetDistanceMeters)
+        try container.encodeIfPresent(targetDuration, forKey: .targetDuration)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(notes, forKey: .notes)
+        try container.encode(activityType, forKey: .activityType)
+        
+        // Programme et localisation
+        try container.encodeIfPresent(trainingProgramId, forKey: .trainingProgramId)
+        try container.encodeIfPresent(meetingLocationName, forKey: .meetingLocationName)
+        try container.encodeIfPresent(meetingLocationCoordinate, forKey: .meetingLocationCoordinate)
+        
+        // Nouveaux champs Refonte Incrément 3
+        try container.encodeIfPresent(runType, forKey: .runType)
+        try container.encodeIfPresent(visibility, forKey: .visibility)
+        try container.encodeIfPresent(isJoinable, forKey: .isJoinable)
+        try container.encodeIfPresent(maxParticipants, forKey: .maxParticipants)
+        
+        // États des participants
+        try container.encodeIfPresent(participantStates, forKey: .participantStates)
+        try container.encodeIfPresent(participantActivity, forKey: .participantActivity)
+        
+        // Timestamps
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(updatedAt, forKey: .updatedAt)
+    }
     
     // MARK: - Computed Properties (Logique métier)
     

@@ -290,6 +290,103 @@ class SessionService {
     
     // MARK: - Participant Tracking Management
     
+    /// 🆕 **NOUVELLE MÉTHODE CLÉ** : Démarre MON tracking (appelée par l'utilisateur)
+    ///
+    /// **Vision métier :**
+    /// - N'importe quel participant peut démarrer SON tracking (pas seulement le créateur)
+    /// - Le participant est automatiquement ajouté s'il n'est pas déjà dans la session
+    /// - Si c'est le premier à démarrer, la session passe de `SCHEDULED` → `ACTIVE`
+    /// - Les autres participants peuvent démarrer après (tracking parallèle)
+    ///
+    /// **Séquence :**
+    /// 1. Ajouter l'utilisateur aux participants (si nécessaire)
+    /// 2. Marquer l'utilisateur comme "active" dans `participantStates`
+    /// 3. Si session encore `SCHEDULED` → Activer la session
+    /// 4. Mettre à jour `participantActivity` (heartbeat)
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session à rejoindre
+    ///   - userId: ID de l'utilisateur qui démarre
+    /// - Throws: `SessionError` si la session n'existe pas ou est terminée
+    func startMyTracking(sessionId: String, userId: String) async throws {
+        Logger.log("🚀 Démarrage de MON tracking pour session: \(sessionId)", category: .session)
+        
+        let sessionRef = db.collection("sessions").document(sessionId)
+        
+        // 1. Vérifier que la session existe et n'est pas terminée
+        let document = try await sessionRef.getDocument()
+        guard let session = try? document.data(as: SessionModel.self) else {
+            Logger.logError(SessionError.sessionNotFound, context: "startMyTracking", category: .session)
+            throw SessionError.sessionNotFound
+        }
+        
+        guard session.status != .ended else {
+            Logger.log("⚠️ Impossible de démarrer : session terminée", category: .session)
+            throw SessionError.alreadyEnded
+        }
+        
+        // 2. Ajouter l'utilisateur aux participants (si pas déjà dedans)
+        if !session.participants.contains(userId) {
+            Logger.log("➕ Ajout participant \(userId) à la session", category: .session)
+            try await sessionRef.updateData([
+                "participants": FieldValue.arrayUnion([userId])
+            ])
+        }
+        
+        // 3. Marquer le participant comme "active" dans participantStates
+        try await sessionRef.updateData([
+            "participantStates.\(userId).status": ParticipantStatus.active.rawValue,
+            "participantStates.\(userId).startedAt": FieldValue.serverTimestamp(),
+            "participantActivity.\(userId).isTracking": true,
+            "participantActivity.\(userId).lastUpdate": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp()
+        ])
+        
+        // 4. Si la session est encore "scheduled", l'activer
+        if session.status == .scheduled {
+            Logger.log("🎯 Premier participant à démarrer → Activation de la session", category: .session)
+            try await sessionRef.updateData([
+                "status": SessionStatus.active.rawValue,
+                "startedAt": FieldValue.serverTimestamp()
+            ])
+        }
+        
+        Logger.logSuccess("✅ Tracking démarré avec succès pour \(userId)", category: .session)
+    }
+    
+    /// 🆕 Arrête MON tracking (sans terminer la session pour les autres)
+    ///
+    /// **Vision métier :**
+    /// - Le participant arrête SON tracking personnel
+    /// - Les autres participants peuvent continuer
+    /// - Si c'est le dernier participant actif, la session est terminée automatiquement
+    ///
+    /// - Parameters:
+    ///   - sessionId: ID de la session
+    ///   - userId: ID de l'utilisateur qui arrête
+    ///   - finalDistance: Distance finale parcourue (en mètres)
+    ///   - finalDuration: Durée totale du tracking (en secondes)
+    /// - Throws: `SessionError` si la session n'existe pas
+    func stopMyTracking(
+        sessionId: String,
+        userId: String,
+        finalDistance: Double,
+        finalDuration: TimeInterval
+    ) async throws {
+        Logger.log("🛑 Arrêt de MON tracking pour session: \(sessionId)", category: .session)
+        
+        // Utiliser la méthode existante
+        try await endParticipantTracking(
+            sessionId: sessionId,
+            userId: userId,
+            finalDistance: finalDistance,
+            finalDuration: finalDuration
+        )
+        
+        // Vérifier si tous les participants ont fini
+        try await checkAndEndSessionIfComplete(sessionId: sessionId)
+    }
+    
     /// 🆕 Démarre le tracking pour un participant spécifique
     ///
     /// Marque le participant comme "actif" dans la session. Si c'est le premier
@@ -633,18 +730,10 @@ class SessionService {
         
         // Récupérer les infos nécessaires
         guard let session = try? document.data(as: SessionModel.self) else {
-            Logger.log("⚠️ Session corrompue, suppression en arrière-plan", category: .session)
-            
-            // Fire-and-forget : Supprimer en arrière-plan sans bloquer
-            Task { @MainActor in
-                do {
-                    try await sessionRef.delete()
-                    Logger.log("✅ Session corrompue supprimée", category: .session)
-                } catch {
-                    Logger.log("⚠️ Échec suppression session corrompue", category: .session)
-                }
-            }
-            
+            // 🛡️ SÉCURITÉ : Ne JAMAIS supprimer une session corrompue
+            // Avec le nouveau décodeur gracieux, ce cas ne devrait plus arriver
+            Logger.log("❌ Session corrompue détectée - Impossible de terminer", category: .session)
+            Logger.log("   💡 Vérifiez SessionModel.init(from:) pour ajouter les champs manquants", category: .session)
             throw SessionError.invalidSession
         }
         
