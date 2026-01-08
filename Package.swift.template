@@ -1,0 +1,115 @@
+// swift-tools-version: 6.0
+// The swift-tools-version declares the minimum version of Swift required to build this package.
+// This is a TEMPLATE file for modular architecture
+// For standard iOS app development, use Xcode with SPM integration (see DEPENDENCY_SETUP_GUIDE.md)
+
+import PackageDescription
+
+let package = Package(
+    name: "RunningMan",
+
+    // Minimum platform versions
+    platforms: [
+        .iOS(.v17)
+    ],
+
+    // Products define the executables and libraries produced by this package
+    products: [
+        .library(
+            name: "RunningManCore",
+            targets: ["Core"]
+        ),
+        .library(
+            name: "RunningManFeatures",
+            targets: ["Features"]
+        ),
+        .library(
+            name: "RunningManModels",
+            targets: ["Models"]
+        ),
+    ],
+
+    // Dependencies declare external packages this package depends on
+    dependencies: [
+        // Firebase iOS SDK - Latest stable version as of Jan 2026
+        .package(
+            url: "https://github.com/firebase/firebase-ios-sdk",
+            from: "11.5.0"
+        ),
+
+        // Optional: Add other dependencies here
+        // Example: Testing library
+        // .package(url: "https://github.com/Quick/Quick", from: "7.0.0"),
+    ],
+
+    // Targets are the basic building blocks of a package
+    targets: [
+        // Core module - Services, utilities, shared code
+        .target(
+            name: "Core",
+            dependencies: [
+                .product(name: "FirebaseAuth", package: "firebase-ios-sdk"),
+                .product(name: "FirebaseCore", package: "firebase-ios-sdk"),
+                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk"),
+            ],
+            path: "Core",
+            exclude: [
+                // Exclude markdown documentation
+                "Services/*.md",
+            ]
+        ),
+
+        // Models module - Data structures
+        .target(
+            name: "Models",
+            dependencies: [
+                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk"),
+            ],
+            path: "Models",
+            exclude: [
+                "*.md",
+            ]
+        ),
+
+        // Features module - UI and feature-specific code
+        .target(
+            name: "Features",
+            dependencies: [
+                "Core",
+                "Models",
+            ],
+            path: "Features",
+            exclude: [
+                "Sessions/*.md",
+            ]
+        ),
+
+        // Resources module - Shared types and utilities
+        .target(
+            name: "Resources",
+            dependencies: [],
+            path: "Resources"
+        ),
+
+        // Utilities module - Helper functions
+        .target(
+            name: "Utilitaires",
+            dependencies: [
+                "Core",
+                "Models",
+                .product(name: "FirebaseFirestore", package: "firebase-ios-sdk"),
+            ],
+            path: "Utilitaires"
+        ),
+
+        // Test targets
+        .testTarget(
+            name: "RunningManTests",
+            dependencies: [
+                "Core",
+                "Features",
+                "Models",
+            ]
+        ),
+    ]
+)
