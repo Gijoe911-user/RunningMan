@@ -38,7 +38,7 @@ struct ParticipantSessionState: Codable, Hashable {
     var endedAt: Date?
     
     /// Durée totale en pause (cumulée)
-    var pausedDuration: TimeInterval = 0
+    var pausedDuration: TimeInterval
     
     /// Date du dernier début de pause (pour calculer pausedDuration)
     var lastPausedAt: Date?
@@ -78,6 +78,39 @@ struct ParticipantSessionState: Codable, Hashable {
         self.endedAt = endedAt
         self.pausedDuration = pausedDuration
         self.lastPausedAt = lastPausedAt
+    }
+    
+    // MARK: - Codable (Graceful Decoding)
+    
+    private enum CodingKeys: String, CodingKey {
+        case status
+        case startedAt
+        case endedAt
+        case pausedDuration
+        case lastPausedAt
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Status (défaut: .waiting si absent)
+        status = try container.decodeIfPresent(ParticipantStatus.self, forKey: .status) ?? .waiting
+        
+        // Tous les autres champs sont optionnels
+        startedAt = try container.decodeIfPresent(Date.self, forKey: .startedAt)
+        endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+        pausedDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .pausedDuration) ?? 0
+        lastPausedAt = try container.decodeIfPresent(Date.self, forKey: .lastPausedAt)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encode(status, forKey: .status)
+        try container.encodeIfPresent(startedAt, forKey: .startedAt)
+        try container.encodeIfPresent(endedAt, forKey: .endedAt)
+        try container.encode(pausedDuration, forKey: .pausedDuration)
+        try container.encodeIfPresent(lastPausedAt, forKey: .lastPausedAt)
     }
     
     // MARK: - Status Management

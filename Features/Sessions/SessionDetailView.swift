@@ -244,13 +244,7 @@ struct SessionDetailView: View {
             // Démarrer
             Button {
                 Task {
-                    Logger.log("[AUDIT-SDV-CTRL-01] ▶️ Démarrage tracking demandé", category: .session)
-                    let started = await trackingManager.startTracking(for: session)
-                    if started {
-                        Logger.logSuccess("[AUDIT-SDV-CTRL-02] ✅ Tracking démarré", category: .session)
-                    } else {
-                        Logger.log("[AUDIT-SDV-CTRL-03] ⚠️ Échec démarrage tracking", category: .session)
-                    }
+                    await startTrackingForSession()
                 }
             } label: {
                 Image(systemName: "play.fill")
@@ -373,7 +367,7 @@ struct SessionDetailView: View {
             
             ForEach(session.participants, id: \.self) { userId in
                 ParticipantRow(
-                    sessionId: session.id ?? "",
+                    sessionId: session.realId,
                     userId: userId,
                     isSelected: false,
                     onTap: {
@@ -426,7 +420,8 @@ struct SessionDetailView: View {
         let isParticipant = session.participants.contains(userId)
         
         // Vérifier si on track cette session
-        let isTrackingThisSession = trackingManager.activeTrackingSession?.id == session.id
+        // 🔥 FIX : Utiliser realId
+        let isTrackingThisSession = trackingManager.activeTrackingSession?.realId == session.realId
         
         return isParticipant && isTrackingThisSession
     }
@@ -442,7 +437,8 @@ struct SessionDetailView: View {
         // 🎯 FIX UI BUG : Vérifier l'état du TrackingManager DIRECTEMENT
         // Ne pas se fier au statut Firestore qui peut être désynchronisé
         let isTrackingActive = trackingManager.trackingState == .active || trackingManager.trackingState == .paused
-        let isTrackingThisSession = trackingManager.activeTrackingSession?.id == session.id
+        // 🔥 FIX : Utiliser realId
+        let isTrackingThisSession = trackingManager.activeTrackingSession?.realId == session.realId
         
         // Fallback sur le statut Firestore si pas de tracking actif
         let isActiveOrPaused = session.status == .active || session.status == .paused
@@ -463,13 +459,66 @@ struct SessionDetailView: View {
     
     // MARK: - Actions
     
+    /// 🎯 FIX : Démarrer le tracking avec recharge de la session et activation
+    private func startTrackingForSession() async {
+        Logger.log("[AUDIT-SDV-START-01] ▶️ Démarrage tracking demandé", category: .session)
+        
+        // 1. Récupérer l'ID de la session
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT" else {
+            Logger.log("[AUDIT-SDV-START-02] ❌ Session ID manquant", category: .session)
+            return
+        }
+        
+        guard let userId = AuthService.shared.currentUserId else {
+            Logger.log("[AUDIT-SDV-START-03] ❌ User ID manquant", category: .session)
+            return
+        }
+        
+        do {
+            // 2. Recharger la session depuis Firestore pour garantir que l'ID est bien injecté
+            Logger.log("[AUDIT-SDV-START-04] 🔄 Rechargement session depuis Firestore...", category: .session)
+            guard let reloadedSession = try await sessionService.getSession(sessionId: sessionId) else {
+                Logger.log("[AUDIT-SDV-START-05] ❌ Impossible de recharger la session", category: .session)
+                return
+            }
+            
+            Logger.log("[AUDIT-SDV-START-06] ✅ Session rechargée - id: \(reloadedSession.id ?? "NIL"), manualId: \(reloadedSession.manualId ?? "NIL"), realId: \(reloadedSession.realId)", category: .session)
+            
+            // 3. Activer la session dans Firestore (passer de SCHEDULED à ACTIVE) si nécessaire
+            if reloadedSession.status == .scheduled {
+                Logger.log("[AUDIT-SDV-START-07] 🚀 Activation session (SCHEDULED → ACTIVE)...", category: .session)
+                try await sessionService.updateSessionFields(sessionId: sessionId, fields: [
+                    "status": SessionStatus.active.rawValue,
+                    "startedAt": FieldValue.serverTimestamp()
+                ])
+                Logger.logSuccess("[AUDIT-SDV-START-08] ✅ Session activée", category: .session)
+            } else {
+                Logger.log("[AUDIT-SDV-START-07B] ℹ️ Session déjà active (status: \(reloadedSession.status.rawValue))", category: .session)
+            }
+            
+            // 4. Démarrer le tracking avec la session rechargée
+            Logger.log("[AUDIT-SDV-START-09] 🏃 Démarrage TrackingManager...", category: .session)
+            let started = await trackingManager.startTracking(for: reloadedSession)
+            
+            if started {
+                Logger.logSuccess("[AUDIT-SDV-START-10] ✅✅ Tracking démarré avec succès!", category: .session)
+            } else {
+                Logger.log("[AUDIT-SDV-START-11] ⚠️ Échec démarrage tracking", category: .session)
+            }
+        } catch {
+            Logger.logError(error, context: "startTrackingForSession", category: .session)
+        }
+    }
+    
     private func loadInitialData() async {
         await loadSquadName()
         userLocation = realtimeService.userCoordinate
         runnerLocations = realtimeService.runnerLocations
         
         // Charger route locale si TrackingManager a déjà des points
-        if trackingManager.isTracking && trackingManager.activeTrackingSession?.id == session.id {
+        // 🔥 FIX : Utiliser realId
+        if trackingManager.isTracking && trackingManager.activeTrackingSession?.realId == session.realId {
             userRouteCoordinates = trackingManager.routeCoordinates
             Logger.log("[AUDIT-SDV-05] 📊 Chargement initial depuis TrackingManager: \(trackingManager.routeCoordinates.count) points", category: .location)
         } else {
@@ -482,10 +531,12 @@ struct SessionDetailView: View {
         realtimeService.setContext(squadId: session.squadId)
         realtimeService.startLocationUpdates()
         
-        guard let sessionId = session.id, let userId = AuthService.shared.currentUserId else { return }
+        // 🔥 FIX : Utiliser realId
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT", let userId = AuthService.shared.currentUserId else { return }
         
         // 🎯 FIX CRITIQUE : Utiliser TrackingManager si c'est une session active en cours de tracking
-        if trackingManager.isTracking && trackingManager.activeTrackingSession?.id == sessionId {
+        if trackingManager.isTracking && trackingManager.activeTrackingSession?.realId == sessionId {
             Logger.log("[AUDIT-SDV-01] 📍 Session active détectée → utilisation TrackingManager", category: .location)
             
             // Observer les changements de routeCoordinates depuis TrackingManager (tracking live)
@@ -513,7 +564,9 @@ struct SessionDetailView: View {
     }
     
     private func loadAllParticipantsRoutes() async {
-        guard let sessionId = session.id else { return }
+        // 🔥 FIX : Utiliser realId
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT" else { return }
         isLoadingRoutes = true
         
         // Charger le tracé de chaque participant
@@ -534,7 +587,9 @@ struct SessionDetailView: View {
     
     private func startParticipantStatsListener() {
         stopParticipantStatsListener()
-        guard let sessionId = session.id else { return }
+        // 🔥 FIX : Utiliser realId
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT" else { return }
         let db = Firestore.firestore()
         
         let statsRef = db.collection("sessions")
@@ -589,24 +644,25 @@ struct SessionDetailView: View {
     }
     
     private func joinAndStartTracking() async {
-        guard let sessionId = session.id,
+        // 🔥 FIX : Utiliser realId
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT",
               let userId = AuthService.shared.currentUserId else { return }
         
         Logger.log("[AUDIT-SDV-JOIN-01] 🤝 Tentative de rejoindre session: \(sessionId)", category: .session)
         
         // ⚠️ PROTECTION: Ne pas rejoindre si on track déjà une autre session
         if trackingManager.isTracking {
-            if let activeSessionId = trackingManager.activeTrackingSession?.id {
-                if activeSessionId == sessionId {
-                    Logger.log("[AUDIT-SDV-JOIN-02] ℹ️ Déjà en train de tracker cette session", category: .session)
-                    return
-                } else {
-                    Logger.log("[AUDIT-SDV-JOIN-03] ⚠️ ERREUR: Vous trackez déjà une autre session (\(activeSessionId)). Arrêtez-la d'abord !", category: .session)
-                    await MainActor.run {
-                        showAlreadyTrackingAlert = true
-                    }
-                    return
+            let activeSessionId = trackingManager.activeTrackingSession?.realId
+            if activeSessionId == sessionId {
+                Logger.log("[AUDIT-SDV-JOIN-02] ℹ️ Déjà en train de tracker cette session", category: .session)
+                return
+            } else if let activeSessionId = activeSessionId, activeSessionId != "ID_MANQUANT" {
+                Logger.log("[AUDIT-SDV-JOIN-03] ⚠️ ERREUR: Vous trackez déjà une autre session (\(activeSessionId)). Arrêtez-la d'abord !", category: .session)
+                await MainActor.run {
+                    showAlreadyTrackingAlert = true
                 }
+                return
             }
         }
         
@@ -633,9 +689,9 @@ struct SessionDetailView: View {
     
     private func exportCurrentRoute() async {
         // Sauvegarde/export du tracé de l’utilisateur si disponible via TrackingManager/RouteHistoryService
-        guard let sessionId = session.id,
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT",
               let userId = AuthService.shared.currentUserId else { return }
-        
         do {
             let points = try await routeHistoryService.loadRoutePoints(sessionId: sessionId, userId: userId)
             let coords = points.map { CLLocationCoordinate2D(latitude: $0.latitude, longitude: $0.longitude) }
@@ -653,9 +709,10 @@ struct SessionDetailView: View {
     private func endSession() {
         Task {
             do {
-                if let sessionId = session.id {
+                let sessionId = session.realId
+                    if sessionId != "ID_MANQUANT" {
                     // Arrêter le tracking si c’est mon tracking en cours
-                    if trackingManager.activeTrackingSession?.id == sessionId {
+                    if trackingManager.activeTrackingSession?.realId == sessionId {
                         try? await trackingManager.stopTracking()
                     }
                     

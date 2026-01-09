@@ -60,12 +60,41 @@ final class LocationProvider: NSObject, ObservableObject {
     }
     
     func startUpdating() {
+        Logger.log("🚀 LocationProvider.startUpdating() appelé - authStatus: \(authorizationStatusString)", category: .location)
+        
         // Si permissions pas encore accordées, demander WhenInUse par défaut
         if authorizationStatus == .notDetermined {
+            Logger.log("📱 Demande de permission de localisation...", category: .location)
             requestWhenInUseAuthorization()
+            // Attendre que l'utilisateur réponde avant de démarrer
+            return
         }
+        
+        // Vérifier que les permissions sont accordées
+        guard authorizationStatus == .authorizedWhenInUse || authorizationStatus == .authorizedAlways else {
+            Logger.log("⚠️ Permissions de localisation non accordées (status: \(authorizationStatusString))", category: .location)
+            return
+        }
+        
+        Logger.log("✅ Démarrage des mises à jour de localisation...", category: .location)
         manager.startUpdatingLocation()
         isUpdating = true
+        
+        #if targetEnvironment(simulator)
+        // Sur simulateur, simuler une position si aucune n'est définie
+        Logger.log("🔧 Mode simulateur détecté - vérification de la position simulée", category: .location)
+        #endif
+    }
+    
+    private var authorizationStatusString: String {
+        switch authorizationStatus {
+        case .notDetermined: return "notDetermined"
+        case .restricted: return "restricted"
+        case .denied: return "denied"
+        case .authorizedAlways: return "authorizedAlways"
+        case .authorizedWhenInUse: return "authorizedWhenInUse"
+        @unknown default: return "unknown"
+        }
     }
     
     func stopUpdating() {
@@ -81,7 +110,30 @@ final class LocationProvider: NSObject, ObservableObject {
 extension LocationProvider: CLLocationManagerDelegate {
     nonisolated func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
         Task { @MainActor in
-            authorizationStatus = status
+            let oldStatus = self.authorizationStatus
+            self.authorizationStatus = status
+            
+            Logger.log("🔐 Authorization status changé: \(self.statusString(oldStatus)) → \(self.statusString(status))", category: .location)
+            
+            // Si l'utilisateur vient d'accepter et qu'on essayait de démarrer, relancer
+            if oldStatus == .notDetermined && (status == .authorizedWhenInUse || status == .authorizedAlways) {
+                Logger.log("✅ Permission accordée → redémarrage automatique des updates", category: .location)
+                manager.startUpdatingLocation()
+                self.isUpdating = true
+            } else if status == .denied || status == .restricted {
+                Logger.log("❌ Permission refusée ou restreinte", category: .location)
+            }
+        }
+    }
+    
+    private func statusString(_ status: CLAuthorizationStatus) -> String {
+        switch status {
+        case .notDetermined: return "notDetermined"
+        case .restricted: return "restricted"
+        case .denied: return "denied"
+        case .authorizedAlways: return "authorizedAlways"
+        case .authorizedWhenInUse: return "authorizedWhenInUse"
+        @unknown default: return "unknown"
         }
     }
     

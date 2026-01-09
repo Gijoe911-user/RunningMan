@@ -48,11 +48,18 @@ struct EnhancedSessionMapView: View {
                 span: MKCoordinateSpan(latitudeDelta: 0.01, longitudeDelta: 0.01)
             )
         ))
+        
+        Logger.log("[MAP-ENH] 🧭 init EnhancedSessionMapView - userLoc: \(userLocation.map { "\($0.latitude), \($0.longitude)" } ?? "nil"), runners: \(runnerLocations.count), myRoutePts: \(routeCoordinates.count), othersRoutes: \(runnerRoutes.count)", category: .ui)
     }
     
     // Fonction publique pour centrer sur un coureur spécifique
     func centerOnRunner(runnerId: String) {
-        guard let runner = runnerLocations.first(where: { $0.id == runnerId }) else { return }
+        guard let runner = runnerLocations.first(where: { $0.id == runnerId }) else {
+            Logger.log("[MAP-ENH] ⚠️ centerOnRunner - runner \(runnerId) introuvable", category: .ui)
+            return
+        }
+        
+        Logger.log("[MAP-ENH] 🎯 centerOnRunner - \(runnerId) @ \(runner.coordinate.latitude), \(runner.coordinate.longitude)", category: .ui)
         
         withAnimation(.easeInOut(duration: 0.5)) {
             position = .region(
@@ -111,6 +118,26 @@ struct EnhancedSessionMapView: View {
                 }
             }
             .mapStyle(.standard(elevation: use3DElevation ? .realistic : .flat))  // ✅ FIX: Toggle 2D/3D
+            .onAppear {
+                Logger.log("[MAP-ENH] ✅ onAppear - runners: \(runnerLocations.count), myRoutePts: \(routeCoordinates.count), othersRoutes: \(runnerRoutes.count)", category: .ui)
+            }
+            .onDisappear {
+                Logger.log("[MAP-ENH] 👋 onDisappear", category: .ui)
+            }
+            .onChange(of: userLocation?.latitude) { _, _ in
+                if let loc = userLocation {
+                    Logger.log("[MAP-ENH] 📍 userLocation changed → \(loc.latitude), \(loc.longitude)", category: .ui)
+                }
+            }
+            .onChange(of: routeCoordinates.count) { old, new in
+                Logger.log("[MAP-ENH] 🧵 routeCoordinates count \(old) → \(new)", category: .ui)
+            }
+            .onChange(of: runnerLocations.count) { old, new in
+                Logger.log("[MAP-ENH] 👥 runnerLocations count \(old) → \(new)", category: .ui)
+            }
+            .onChange(of: runnerRoutes.count) { old, new in
+                Logger.log("[MAP-ENH] 🗺️ runnerRoutes users \(old) → \(new)", category: .ui)
+            }
             
             // Overlay avec infos et contrôles
             VStack {
@@ -202,6 +229,7 @@ struct EnhancedSessionMapView: View {
                 color: .coralAccent,
                 label: ""
             ) {
+                Logger.log("[MAP-ENH] 🎯 Recenter pressed", category: .ui)
                 recenterOnUser()
             }
             
@@ -211,6 +239,7 @@ struct EnhancedSessionMapView: View {
                 color: .blue,
                 label: ""
             ) {
+                Logger.log("[MAP-ENH] 👥 ShowAllRunners pressed", category: .ui)
                 showAllRunnersOnMap()
             }
             
@@ -220,6 +249,7 @@ struct EnhancedSessionMapView: View {
                 color: .purple,
                 label: ""
             ) {
+                Logger.log("[MAP-ENH] ➕ ZoomIn pressed", category: .ui)
                 zoomIn()
             }
             
@@ -229,6 +259,7 @@ struct EnhancedSessionMapView: View {
                 color: .purple,
                 label: ""
             ) {
+                Logger.log("[MAP-ENH] ➖ ZoomOut pressed", category: .ui)
                 zoomOut()
             }
             
@@ -239,6 +270,7 @@ struct EnhancedSessionMapView: View {
                     color: .green,
                     label: ""
                 ) {
+                    Logger.log("[MAP-ENH] 💾 SaveRoute pressed (pts: \(routeCoordinates.count))", category: .ui)
                     onSaveRoute?()
                 }
             }
@@ -252,6 +284,7 @@ struct EnhancedSessionMapView: View {
                 withAnimation {
                     use3DElevation.toggle()
                 }
+                Logger.log("[MAP-ENH] 🗺️ Elevation toggled → \(use3DElevation ? "3D" : "2D")", category: .ui)
                 
                 // Haptic feedback
                 let generator = UIImpactFeedbackGenerator(style: .medium)
@@ -265,7 +298,10 @@ struct EnhancedSessionMapView: View {
     // MARK: - Actions
     
     private func recenterOnUser() {
-        guard let location = userLocation else { return }
+        guard let location = userLocation else {
+            Logger.log("[MAP-ENH] ⚠️ recenterOnUser - userLocation nil", category: .ui)
+            return
+        }
         
         withAnimation(.easeInOut(duration: 0.5)) {
             position = .region(
@@ -284,16 +320,8 @@ struct EnhancedSessionMapView: View {
     }
     
     private func zoomIn() {
-        // Solution: Créer une nouvelle région basée sur l'actuelle
-        // En utilisant .region directement
         let currentCenter = userLocation ?? CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
-        
-        // Créer une nouvelle région avec un span réduit
-        // Note: On utilise un span par défaut si on ne peut pas extraire l'actuel
-        let newSpan = MKCoordinateSpan(
-            latitudeDelta: 0.005, // Moitié de 0.01
-            longitudeDelta: 0.005
-        )
+        let newSpan = MKCoordinateSpan(latitudeDelta: 0.005, longitudeDelta: 0.005)
         
         withAnimation(.easeInOut(duration: 0.3)) {
             position = .region(
@@ -310,14 +338,8 @@ struct EnhancedSessionMapView: View {
     }
     
     private func zoomOut() {
-        // Solution: Créer une nouvelle région basée sur l'actuelle
         let currentCenter = userLocation ?? CLLocationCoordinate2D(latitude: 48.8566, longitude: 2.3522)
-        
-        // Créer une nouvelle région avec un span agrandi
-        let newSpan = MKCoordinateSpan(
-            latitudeDelta: 0.02, // Double de 0.01
-            longitudeDelta: 0.02
-        )
+        let newSpan = MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02)
         
         withAnimation(.easeInOut(duration: 0.3)) {
             position = .region(
@@ -342,10 +364,14 @@ struct EnhancedSessionMapView: View {
         
         allCoordinates.append(contentsOf: runnerLocations.map { $0.coordinate })
         
-        guard !allCoordinates.isEmpty else { return }
+        guard !allCoordinates.isEmpty else {
+            Logger.log("[MAP-ENH] ⚠️ showAllRunnersOnMap - no coordinates", category: .ui)
+            return
+        }
         
         // Calculer la région qui contient tous les coureurs
         let region = calculateRegion(for: allCoordinates)
+        Logger.log("[MAP-ENH] 🗺️ showAllRunnersOnMap → region span: \(region.span.latitudeDelta), \(region.span.longitudeDelta)", category: .ui)
         
         withAnimation(.easeInOut(duration: 0.5)) {
             position = .region(region)
@@ -552,3 +578,4 @@ struct RunnerMapMarker: View {
         ]
     )
 }
+

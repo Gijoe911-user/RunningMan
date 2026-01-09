@@ -60,6 +60,7 @@ struct LocationPickerView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("Annuler") {
+                        Logger.log("[MAP-PICKER] ❌ Annuler pressed", category: .ui)
                         dismiss()
                     }
                     .foregroundColor(.white)
@@ -67,6 +68,7 @@ struct LocationPickerView: View {
             }
         }
         .onAppear {
+            Logger.log("[MAP-PICKER] ✅ onAppear - existing: name='\(selectedLocation)', coord=\(selectedCoordinate.map { "\($0.latitude), \($0.longitude)" } ?? "nil")", category: .ui)
             // Centrer sur la localisation actuelle ou celle existante
             if let coord = selectedCoordinate {
                 tempCoordinate = coord
@@ -74,7 +76,11 @@ struct LocationPickerView: View {
                 mapPosition = .camera(
                     MapCamera(centerCoordinate: coord, distance: 1000)
                 )
+                Logger.log("[MAP-PICKER] 🎥 set camera to existing coord", category: .ui)
             }
+        }
+        .onDisappear {
+            Logger.log("[MAP-PICKER] 👋 onDisappear", category: .ui)
         }
     }
     
@@ -91,6 +97,7 @@ struct LocationPickerView: View {
                     .onChange(of: searchText) { _, newValue in
                         if !newValue.isEmpty {
                             isSearching = true
+                            Logger.log("[MAP-PICKER] 🔎 search query: '\(newValue)'", category: .ui)
                             performSearch(query: newValue)
                         } else {
                             isSearching = false
@@ -100,6 +107,7 @@ struct LocationPickerView: View {
                 
                 if !searchText.isEmpty {
                     Button {
+                        Logger.log("[MAP-PICKER] ✖️ clear search", category: .ui)
                         searchText = ""
                         searchResults = []
                         isSearching = false
@@ -116,6 +124,7 @@ struct LocationPickerView: View {
             
             // Bouton de géolocalisation
             Button {
+                Logger.log("[MAP-PICKER] 📍 centerOnUser pressed", category: .ui)
                 centerOnUserLocation()
             } label: {
                 Image(systemName: "location.fill")
@@ -150,7 +159,13 @@ struct LocationPickerView: View {
                 }
             }
             .onTapGesture { coordinate in
+                Logger.log("[MAP-PICKER] 👆 map tapped (point), handler not implemented", category: .ui)
                 handleMapTap(at: coordinate)
+            }
+            .onChange(of: tempCoordinate?.latitude) { _, _ in
+                if let c = tempCoordinate {
+                    Logger.log("[MAP-PICKER] 📍 tempCoordinate changed → \(c.latitude), \(c.longitude)", category: .ui)
+                }
             }
             
             // Résultats de recherche (overlay)
@@ -168,6 +183,7 @@ struct LocationPickerView: View {
             VStack(spacing: 1) {
                 ForEach(searchResults, id: \.self) { item in
                     Button {
+                        Logger.log("[MAP-PICKER] ✅ selectSearchResult: \(item.name ?? "unknown")", category: .ui)
                         selectSearchResult(item)
                     } label: {
                         HStack {
@@ -235,6 +251,7 @@ struct LocationPickerView: View {
     
     private var confirmButton: some View {
         Button {
+            Logger.log("[MAP-PICKER] ✅ confirmSelection pressed", category: .ui)
             confirmSelection()
         } label: {
             HStack {
@@ -274,7 +291,10 @@ struct LocationPickerView: View {
         let search = MKLocalSearch(request: request)
         search.start { response, error in
             if let response = response {
+                Logger.log("[MAP-PICKER] 🔎 results: \(response.mapItems.count)", category: .ui)
                 searchResults = response.mapItems
+            } else if let error = error {
+                Logger.logError(error, context: "performSearch", category: .ui)
             }
         }
     }
@@ -315,10 +335,14 @@ struct LocationPickerView: View {
     }
     
     private func confirmSelection() {
-        guard let coord = tempCoordinate else { return }
+        guard let coord = tempCoordinate else {
+            Logger.log("[MAP-PICKER] ⚠️ confirmSelection sans coordonnée", category: .ui)
+            return
+        }
         
         selectedCoordinate = coord
         selectedLocation = tempLocationName
+        Logger.log("[MAP-PICKER] ✅ confirmed → '\(selectedLocation)' @ \(coord.latitude), \(coord.longitude)", category: .ui)
         
         dismiss()
     }
@@ -328,15 +352,11 @@ struct LocationPickerView: View {
     /// Extrait l'adresse d'un MKMapItem de manière compatible toutes versions
     private func getAddressString(from item: MKMapItem) -> String? {
         if #available(iOS 26.0, *) {
-            // iOS 26+ : Utiliser les nouvelles APIs
             if let name = item.name {
                 return name
             }
-            // MKAddress n'a pas de propriétés accessibles directement
-            // On utilise le nom du lieu comme fallback
             return "Lieu sélectionné"
         } else {
-            // iOS < 26 : Utiliser placemark (ancien comportement)
             if let name = item.placemark.name {
                 return name
             }
@@ -360,3 +380,4 @@ struct LocationPickerView: View {
         selectedCoordinate: $coordinate
     )
 }
+

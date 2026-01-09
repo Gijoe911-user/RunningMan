@@ -14,6 +14,13 @@ struct SessionModel: Identifiable, Codable, Hashable {
     // MARK: - Properties (Stored Properties - Toutes optionnelles pour Firestore)
     
     @DocumentID var id: String?
+    var manualId: String? // 🔥 Champ de secours si @DocumentID échoue
+    
+    /// ID réel garanti (ne sera jamais nil si au moins un des deux existe)
+    var realId: String {
+        return id ?? manualId ?? "ID_MANQUANT"
+    }
+    
     var squadId: String
     var creatorId: String
     
@@ -126,6 +133,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
     
     init(
         id: String? = nil,
+        manualId: String? = nil,
         squadId: String,
         creatorId: String,
         startedAt: Date = Date(),
@@ -155,6 +163,7 @@ struct SessionModel: Identifiable, Codable, Hashable {
         updatedAt: Date? = nil
     ) {
         self.id = id
+        self.manualId = manualId
         self.squadId = squadId
         self.creatorId = creatorId
         self._startedAt = startedAt
@@ -187,8 +196,10 @@ struct SessionModel: Identifiable, Codable, Hashable {
     
     // MARK: - CodingKeys
     
+    /// ⚠️ IMPORTANT : 'manualId' mappe aussi le champ 'id' de Firestore comme secours
     private enum CodingKeys: String, CodingKey {
-        case id
+        // @DocumentID gère 'id' automatiquement, mais on ajoute manualId comme backup
+        case manualId = "id"  // 🔥 Champ de secours mappé sur "id" dans Firestore
         case squadId
         case creatorId
         case _startedAt = "startedAt"
@@ -218,9 +229,164 @@ struct SessionModel: Identifiable, Codable, Hashable {
         case _updatedAt = "updatedAt"
     }
     
-    // MARK: - Codable (Automatic Synthesis)
-    // ✅ Plus besoin de décodeur/encodeur custom !
-    // Les computed properties gèrent automatiquement les valeurs par défaut
+    // MARK: - Codable (Custom Implementation for Graceful Decoding)
+    
+    /// Décodeur custom ultra-tolérant : tous les champs sont optionnels sauf squadId et creatorId
+    /// ⚠️ **IMPORTANT : L'ID est décodé via @DocumentID ET manualId pour double sécurité**
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Diagnostic détaillé en cas d'erreur
+        do {
+            // 🔥 Décoder manualId comme backup (mappe sur le champ "id" de Firestore)
+            manualId = try container.decodeIfPresent(String.self, forKey: .manualId)
+            
+            // ⚠️ @DocumentID injecte automatiquement l'ID après notre init()
+            // Si ça échoue, on aura au moins manualId
+            
+            // Champs REQUIS (avec diagnostic d'erreur)
+            guard let decodedSquadId = try container.decodeIfPresent(String.self, forKey: .squadId) else {
+                print("❌ ERREUR DÉCODAGE : squadId manquant")
+                throw DecodingError.keyNotFound(
+                    CodingKeys.squadId,
+                    DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "squadId est requis")
+                )
+            }
+            squadId = decodedSquadId
+            
+            guard let decodedCreatorId = try container.decodeIfPresent(String.self, forKey: .creatorId) else {
+                print("❌ ERREUR DÉCODAGE : creatorId manquant")
+                throw DecodingError.keyNotFound(
+                    CodingKeys.creatorId,
+                    DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "creatorId est requis")
+                )
+            }
+            creatorId = decodedCreatorId
+            
+            // Tous les autres champs sont OPTIONNELS avec decodeIfPresent
+            _startedAt = try container.decodeIfPresent(Date.self, forKey: ._startedAt)
+            _status = try container.decodeIfPresent(SessionStatus.self, forKey: ._status)
+            _participants = try container.decodeIfPresent([String].self, forKey: ._participants)
+            
+            endedAt = try container.decodeIfPresent(Date.self, forKey: .endedAt)
+            
+            // Stats (tous optionnels)
+            totalDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .totalDistanceMeters)
+            durationSeconds = try container.decodeIfPresent(TimeInterval.self, forKey: .durationSeconds)
+            averageSpeed = try container.decodeIfPresent(Double.self, forKey: .averageSpeed)
+            startLocation = try container.decodeIfPresent(GeoPoint.self, forKey: .startLocation)
+            messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount)
+            
+            // Target
+            targetDistanceMeters = try container.decodeIfPresent(Double.self, forKey: .targetDistanceMeters)
+            targetDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .targetDuration)
+            title = try container.decodeIfPresent(String.self, forKey: .title)
+            notes = try container.decodeIfPresent(String.self, forKey: .notes)
+            
+            _activityType = try container.decodeIfPresent(ActivityType.self, forKey: ._activityType)
+            
+            // Training
+            trainingProgramId = try container.decodeIfPresent(String.self, forKey: .trainingProgramId)
+            
+            // Location
+            meetingLocationName = try container.decodeIfPresent(String.self, forKey: .meetingLocationName)
+            meetingLocationCoordinate = try container.decodeIfPresent(GeoPoint.self, forKey: .meetingLocationCoordinate)
+            
+            // Run type & visibility
+            _runType = try container.decodeIfPresent(RunType.self, forKey: ._runType)
+            _visibility = try container.decodeIfPresent(SessionVisibility.self, forKey: ._visibility)
+            _isJoinable = try container.decodeIfPresent(Bool.self, forKey: ._isJoinable)
+            
+            maxParticipants = try container.decodeIfPresent(Int.self, forKey: .maxParticipants)
+            
+            // États participants (optionnels)
+            participantStates = try container.decodeIfPresent([String: ParticipantSessionState].self, forKey: .participantStates)
+            participantActivity = try container.decodeIfPresent([String: ParticipantActivity].self, forKey: .participantActivity)
+            
+            // Timestamps
+            _createdAt = try container.decodeIfPresent(Date.self, forKey: ._createdAt)
+            _updatedAt = try container.decodeIfPresent(Date.self, forKey: ._updatedAt)
+            
+        } catch let error as DecodingError {
+            // Log détaillé de l'erreur
+            switch error {
+            case .keyNotFound(let key, let context):
+                print("❌ ERREUR DÉCODAGE SessionModel : Clé manquante '\(key.stringValue)'")
+                print("   Context: \(context.debugDescription)")
+                print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            case .typeMismatch(let type, let context):
+                print("❌ ERREUR DÉCODAGE SessionModel : Type incompatible pour '\(type)'")
+                print("   Context: \(context.debugDescription)")
+                print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            case .valueNotFound(let type, let context):
+                print("❌ ERREUR DÉCODAGE SessionModel : Valeur manquante pour type '\(type)'")
+                print("   Context: \(context.debugDescription)")
+                print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            case .dataCorrupted(let context):
+                print("❌ ERREUR DÉCODAGE SessionModel : Données corrompues")
+                print("   Context: \(context.debugDescription)")
+                print("   CodingPath: \(context.codingPath.map { $0.stringValue }.joined(separator: " -> "))")
+            @unknown default:
+                print("❌ ERREUR DÉCODAGE SessionModel : Erreur inconnue - \(error)")
+            }
+            throw error
+        } catch {
+            print("❌ ERREUR DÉCODAGE SessionModel (autre) : \(error)")
+            throw error
+        }
+    }
+    
+    /// Encodeur custom pour sauvegarder uniquement les valeurs non-nil
+    /// ⚠️ L'ID n'est pas encodé car @DocumentID le gère automatiquement
+    /// Mais on encode manualId comme backup
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        // ⚠️ Ne PAS encoder l'ID - Firebase/Firestore le gère via @DocumentID
+        // Mais on encode manualId pour assurer la persistance
+        try container.encodeIfPresent(manualId, forKey: .manualId)
+        
+        // Champs requis
+        try container.encode(squadId, forKey: .squadId)
+        try container.encode(creatorId, forKey: .creatorId)
+        
+        // Champs optionnels (encoder seulement si non-nil)
+        try container.encodeIfPresent(_startedAt, forKey: ._startedAt)
+        try container.encodeIfPresent(_status, forKey: ._status)
+        try container.encodeIfPresent(_participants, forKey: ._participants)
+        
+        try container.encodeIfPresent(endedAt, forKey: .endedAt)
+        
+        try container.encodeIfPresent(totalDistanceMeters, forKey: .totalDistanceMeters)
+        try container.encodeIfPresent(durationSeconds, forKey: .durationSeconds)
+        try container.encodeIfPresent(averageSpeed, forKey: .averageSpeed)
+        try container.encodeIfPresent(startLocation, forKey: .startLocation)
+        try container.encodeIfPresent(messageCount, forKey: .messageCount)
+        
+        try container.encodeIfPresent(targetDistanceMeters, forKey: .targetDistanceMeters)
+        try container.encodeIfPresent(targetDuration, forKey: .targetDuration)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(notes, forKey: .notes)
+        
+        try container.encodeIfPresent(_activityType, forKey: ._activityType)
+        
+        try container.encodeIfPresent(trainingProgramId, forKey: .trainingProgramId)
+        
+        try container.encodeIfPresent(meetingLocationName, forKey: .meetingLocationName)
+        try container.encodeIfPresent(meetingLocationCoordinate, forKey: .meetingLocationCoordinate)
+        
+        try container.encodeIfPresent(_runType, forKey: ._runType)
+        try container.encodeIfPresent(_visibility, forKey: ._visibility)
+        try container.encodeIfPresent(_isJoinable, forKey: ._isJoinable)
+        
+        try container.encodeIfPresent(maxParticipants, forKey: .maxParticipants)
+        
+        try container.encodeIfPresent(participantStates, forKey: .participantStates)
+        try container.encodeIfPresent(participantActivity, forKey: .participantActivity)
+        
+        try container.encodeIfPresent(_createdAt, forKey: ._createdAt)
+        try container.encodeIfPresent(_updatedAt, forKey: ._updatedAt)
+    }
     
     // MARK: - Computed Properties (Logique métier)
     
@@ -353,8 +519,12 @@ struct SessionModel: Identifiable, Codable, Hashable {
     }
 
     // MARK: - Hashable Implementation
-    static func == (lhs: SessionModel, rhs: SessionModel) -> Bool { lhs.id == rhs.id }
-    func hash(into hasher: inout Hasher) { hasher.combine(id) }
+    static func == (lhs: SessionModel, rhs: SessionModel) -> Bool { 
+        lhs.realId == rhs.realId 
+    }
+    func hash(into hasher: inout Hasher) { 
+        hasher.combine(realId) 
+    }
 }
 
 // MARK: - Enums
@@ -436,12 +606,12 @@ enum SessionVisibility: String, Codable, CaseIterable {
 
 struct ParticipantStats: Codable {
     var userId: String
-    var distance: Double = 0
-    var duration: TimeInterval = 0
-    var averageSpeed: Double = 0
-    var maxSpeed: Double = 0
-    var locationPointsCount: Int = 0
-    var joinedAt: Date = Date()
+    var distance: Double
+    var duration: TimeInterval
+    var averageSpeed: Double
+    var maxSpeed: Double
+    var locationPointsCount: Int
+    var joinedAt: Date
     var leftAt: Date?
     
     // 🆕 HealthKit - Données biométriques
@@ -451,6 +621,79 @@ struct ParticipantStats: Codable {
     var minHeartRate: Double?      // BPM min
     var calories: Double?          // Calories brûlées
     var heartRateUpdatedAt: Date?  // Dernière mise à jour
+    
+    // MARK: - Codable (Graceful Decoding)
+    
+    private enum CodingKeys: String, CodingKey {
+        case userId
+        case distance
+        case duration
+        case averageSpeed
+        case maxSpeed
+        case locationPointsCount
+        case joinedAt
+        case leftAt
+        case currentHeartRate
+        case averageHeartRate
+        case maxHeartRate
+        case minHeartRate
+        case calories
+        case heartRateUpdatedAt
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Champs requis avec valeurs par défaut
+        userId = try container.decodeIfPresent(String.self, forKey: .userId) ?? ""
+        distance = try container.decodeIfPresent(Double.self, forKey: .distance) ?? 0
+        duration = try container.decodeIfPresent(TimeInterval.self, forKey: .duration) ?? 0
+        averageSpeed = try container.decodeIfPresent(Double.self, forKey: .averageSpeed) ?? 0
+        maxSpeed = try container.decodeIfPresent(Double.self, forKey: .maxSpeed) ?? 0
+        locationPointsCount = try container.decodeIfPresent(Int.self, forKey: .locationPointsCount) ?? 0
+        joinedAt = try container.decodeIfPresent(Date.self, forKey: .joinedAt) ?? Date()
+        
+        // Champs optionnels
+        leftAt = try container.decodeIfPresent(Date.self, forKey: .leftAt)
+        currentHeartRate = try container.decodeIfPresent(Double.self, forKey: .currentHeartRate)
+        averageHeartRate = try container.decodeIfPresent(Double.self, forKey: .averageHeartRate)
+        maxHeartRate = try container.decodeIfPresent(Double.self, forKey: .maxHeartRate)
+        minHeartRate = try container.decodeIfPresent(Double.self, forKey: .minHeartRate)
+        calories = try container.decodeIfPresent(Double.self, forKey: .calories)
+        heartRateUpdatedAt = try container.decodeIfPresent(Date.self, forKey: .heartRateUpdatedAt)
+    }
+    
+    init(
+        userId: String,
+        distance: Double = 0,
+        duration: TimeInterval = 0,
+        averageSpeed: Double = 0,
+        maxSpeed: Double = 0,
+        locationPointsCount: Int = 0,
+        joinedAt: Date = Date(),
+        leftAt: Date? = nil,
+        currentHeartRate: Double? = nil,
+        averageHeartRate: Double? = nil,
+        maxHeartRate: Double? = nil,
+        minHeartRate: Double? = nil,
+        calories: Double? = nil,
+        heartRateUpdatedAt: Date? = nil
+    ) {
+        self.userId = userId
+        self.distance = distance
+        self.duration = duration
+        self.averageSpeed = averageSpeed
+        self.maxSpeed = maxSpeed
+        self.locationPointsCount = locationPointsCount
+        self.joinedAt = joinedAt
+        self.leftAt = leftAt
+        self.currentHeartRate = currentHeartRate
+        self.averageHeartRate = averageHeartRate
+        self.maxHeartRate = maxHeartRate
+        self.minHeartRate = minHeartRate
+        self.calories = calories
+        self.heartRateUpdatedAt = heartRateUpdatedAt
+    }
 }
 
 // MARK: - Location Point
@@ -464,6 +707,53 @@ struct LocationPoint: Codable {
     var horizontalAccuracy: Double
     var timestamp: Date
     @ServerTimestamp var serverTimestamp: Timestamp?
+    
+    // MARK: - Codable (Graceful Decoding)
+    
+    private enum CodingKeys: String, CodingKey {
+        case userId
+        case latitude
+        case longitude
+        case altitude
+        case speed
+        case horizontalAccuracy
+        case timestamp
+        case serverTimestamp
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Champs requis avec valeurs par défaut
+        userId = try container.decodeIfPresent(String.self, forKey: .userId) ?? ""
+        latitude = try container.decodeIfPresent(Double.self, forKey: .latitude) ?? 0
+        longitude = try container.decodeIfPresent(Double.self, forKey: .longitude) ?? 0
+        altitude = try container.decodeIfPresent(Double.self, forKey: .altitude) ?? 0
+        speed = try container.decodeIfPresent(Double.self, forKey: .speed) ?? 0
+        horizontalAccuracy = try container.decodeIfPresent(Double.self, forKey: .horizontalAccuracy) ?? 0
+        timestamp = try container.decodeIfPresent(Date.self, forKey: .timestamp) ?? Date()
+        serverTimestamp = try container.decodeIfPresent(Timestamp.self, forKey: .serverTimestamp)
+    }
+    
+    init(
+        userId: String,
+        latitude: Double,
+        longitude: Double,
+        altitude: Double,
+        speed: Double,
+        horizontalAccuracy: Double,
+        timestamp: Date,
+        serverTimestamp: Timestamp? = nil
+    ) {
+        self.userId = userId
+        self.latitude = latitude
+        self.longitude = longitude
+        self.altitude = altitude
+        self.speed = speed
+        self.horizontalAccuracy = horizontalAccuracy
+        self.timestamp = timestamp
+        self.serverTimestamp = serverTimestamp
+    }
 }
 
 // MARK: - Participant Activity (Heartbeat)
@@ -519,6 +809,34 @@ struct ParticipantActivity: Codable, Hashable {
         self.isTracking = isTracking
         self.lastLocation = lastLocation
         self.lastHeartRate = lastHeartRate
+    }
+    
+    // MARK: - Codable (Graceful Decoding)
+    
+    private enum CodingKeys: String, CodingKey {
+        case lastUpdate
+        case isTracking
+        case lastLocation
+        case lastHeartRate
+    }
+    
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Champs avec valeurs par défaut si absents
+        lastUpdate = try container.decodeIfPresent(Date.self, forKey: .lastUpdate) ?? Date()
+        isTracking = try container.decodeIfPresent(Bool.self, forKey: .isTracking) ?? false
+        lastLocation = try container.decodeIfPresent(GeoPoint.self, forKey: .lastLocation)
+        lastHeartRate = try container.decodeIfPresent(Double.self, forKey: .lastHeartRate)
+    }
+    
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        
+        try container.encode(lastUpdate, forKey: .lastUpdate)
+        try container.encode(isTracking, forKey: .isTracking)
+        try container.encodeIfPresent(lastLocation, forKey: .lastLocation)
+        try container.encodeIfPresent(lastHeartRate, forKey: .lastHeartRate)
     }
     
     // MARK: - Update Methods

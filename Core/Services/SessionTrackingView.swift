@@ -90,8 +90,11 @@ struct SessionTrackingView: View {
         .task {
             // 🆕 MODE SPECTATEUR : Charger les routes existantes SANS démarrer le tracking
             if let sessionId = session.id {
+                Logger.log("[FLOW] 🧭 Navigated to SessionTrackingView from UI, sessionId: \(sessionId)", category: .ui)
                 Logger.log("[SPECTATOR] 👁️ Entrée en mode spectateur - session: \(sessionId)", category: .ui)
                 await loadExistingRoutes(sessionId: sessionId)
+            } else {
+                Logger.log("[FLOW] 🧭 Navigated to SessionTrackingView with sessionId: nil", category: .ui)
             }
         }
         .onChange(of: trackingManager.trackingState) { oldValue, newValue in
@@ -108,6 +111,9 @@ struct SessionTrackingView: View {
             // Initialiser l'état local
             currentTrackingState = trackingManager.trackingState
             Logger.log("[AUDIT-STV-01] 🏃 SessionTrackingView.onAppear - session: \(session.id ?? "unknown")", category: .ui)
+        }
+        .onDisappear {
+            Logger.log("[AUDIT-STV-06] 👋 SessionTrackingView.onDisappear", category: .ui)
         }
         .alert("Terminer la session ?", isPresented: $showStopConfirmation) {
             Button("Annuler", role: .cancel) { }
@@ -602,23 +608,36 @@ struct TrackingMapView: View {
         }
         .mapStyle(.standard(elevation: .realistic))
         .onChange(of: userLocation?.latitude) { _, _ in
+            Logger.log("[MAP-TRACK] 📍 userLocation changed (lat)", category: .ui)
             centerOnUserLocation()
         }
         .onChange(of: userLocation?.longitude) { _, _ in
+            Logger.log("[MAP-TRACK] 📍 userLocation changed (lon)", category: .ui)
             centerOnUserLocation()
         }
+        .onChange(of: routeCoordinates.count) { old, new in
+            Logger.log("[MAP-TRACK] 🧵 routeCoordinates count \(old) → \(new)", category: .ui)
+        }
         .onAppear {
+            Logger.log("[MAP-TRACK] ✅ onAppear - userLoc: \(userLocation.map { "\($0.latitude), \($0.longitude)" } ?? "nil"), routePts: \(routeCoordinates.count)", category: .ui)
             centerOnUserLocation()
+        }
+        .onDisappear {
+            Logger.log("[MAP-TRACK] 👋 onDisappear", category: .ui)
         }
     }
     
     private func centerOnUserLocation() {
-        guard let location = userLocation else { return }
+        guard let location = userLocation else {
+            Logger.log("[MAP-TRACK] ⚠️ centerOnUserLocation with nil userLocation", category: .ui)
+            return
+        }
         
         // Vérifier si la position a vraiment changé
         if let last = lastUserLocation,
            abs(last.latitude - location.latitude) < 0.0001 &&
            abs(last.longitude - location.longitude) < 0.0001 {
+            Logger.log("[MAP-TRACK] ⏭️ skip center (no significant change)", category: .ui)
             return
         }
         
@@ -634,6 +653,7 @@ struct TrackingMapView: View {
                 )
             )
         }
+        Logger.log("[MAP-TRACK] 🎯 centered on user @ \(location.latitude), \(location.longitude)", category: .ui)
     }
 }
 
@@ -651,3 +671,4 @@ struct TrackingMapView: View {
     }
     .preferredColorScheme(.dark)
 }
+

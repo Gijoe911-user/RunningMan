@@ -16,6 +16,9 @@ struct SquadSessionsListView: View {
     @State private var errorMessage: String?
     @State private var selectedTab: SessionTab = .active
     @State private var hasLoaded = false  // ✅ FIX: Cache pour éviter de recharger
+    @State private var zombieSessionsCount = 0  // 🆕 Compteur de sessions corrompues
+    @State private var showCleanupConfirmation = false  // 🆕 Confirmation nettoyage
+    @State private var isCleaning = false  // 🆕 État de nettoyage
     
     enum SessionTab {
         case active
@@ -52,15 +55,48 @@ struct SquadSessionsListView: View {
         }
         .navigationTitle("Sessions")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            // 🆕 Bouton de nettoyage (visible seulement si sessions corrompues détectées)
+            if zombieSessionsCount > 0 {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showCleanupConfirmation = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                            Text("\(zombieSessionsCount)")
+                        }
+                        .font(.caption.bold())
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.red)
+                        .clipShape(Capsule())
+                    }
+                }
+            }
+        }
+        .alert("Nettoyer les sessions ?", isPresented: $showCleanupConfirmation) {
+            Button("Annuler", role: .cancel) { }
+            Button("Nettoyer", role: .destructive) {
+                Task {
+                    await cleanupZombieSessions()
+                }
+            }
+        } message: {
+            Text("\(zombieSessionsCount) session(s) corrompue(s) ou zombie(s) détectée(s). Les supprimer ?")
+        }
         .task {
             // ✅ FIX: Ne charger qu'une seule fois
             if !hasLoaded {
                 await loadSessions()
+                await detectZombieSessions()  // 🆕 Détecter les zombies
                 hasLoaded = true
             }
         }
         .refreshable {
             await loadSessions()
+            await detectZombieSessions()  // 🆕 Détecter les zombies après refresh
         }
         .alert("Erreur", isPresented: .constant(errorMessage != nil)) {
             Button("OK") { errorMessage = nil }
@@ -265,6 +301,45 @@ struct SquadSessionsListView: View {
             
             isLoading = false
         }
+    }
+    
+    // MARK: - Detect & Cleanup Zombie Sessions
+    
+    /// 🔍 Détecte les sessions corrompues ou zombies (sans les modifier)
+    private func detectZombieSessions() async {
+        guard let squadId = squad.id else { return }
+        
+        do {
+            let zombieIds = try await SessionService.shared.detectZombieSessions(squadId: squadId)
+            zombieSessionsCount = zombieIds.count
+            
+            if zombieSessionsCount > 0 {
+                Logger.log("⚠️ \(zombieSessionsCount) session(s) zombie(s) détectée(s)", category: .ui)
+            }
+        } catch {
+            Logger.logError(error, context: "detectZombieSessions", category: .ui)
+        }
+    }
+    
+    /// 🧹 Nettoie les sessions zombies
+    private func cleanupZombieSessions() async {
+        guard let squadId = squad.id else { return }
+        
+        isCleaning = true
+        
+        do {
+            let cleaned = try await SessionService.shared.cleanupCorruptedSessions(squadId: squadId)
+            Logger.logSuccess("✅ \(cleaned) session(s) nettoyée(s)", category: .ui)
+            
+            // Recharger après nettoyage
+            await loadSessions()
+            await detectZombieSessions()
+        } catch {
+            Logger.logError(error, context: "cleanupZombieSessions", category: .ui)
+            errorMessage = "Erreur lors du nettoyage: \(error.localizedDescription)"
+        }
+        
+        isCleaning = false
     }
 }
 

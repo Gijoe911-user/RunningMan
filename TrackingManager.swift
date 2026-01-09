@@ -106,6 +106,133 @@ class TrackingManager: ObservableObject {
         Logger.log("🎯 TrackingManager initialisé", category: .location)
     }
     
+    // MARK: - Reconciliation & Maintenance
+    
+    /// 🔄 Réconcilie l'état local avec Firestore
+    ///
+    /// **Cas d'usage :**
+    /// - Au démarrage de l'app (éviter les sessions zombies en mémoire)
+    /// - Après un crash/redémarrage de l'app
+    /// - Si l'utilisateur a terminé une session depuis un autre appareil
+    ///
+    /// **Logique :**
+    /// - Si session locale active → Vérifier son état dans Firestore
+    /// - Si session terminée dans Firestore → Réinitialiser l'état local
+    /// - Si session introuvable dans Firestore → Réinitialiser l'état local
+    ///
+    /// **Appel recommandé :**
+    /// - Dans `AppDelegate.didFinishLaunching`
+    /// - Ou dans la vue racine `.task {}`
+    ///
+    /// - Returns: `true` si une session locale a été nettoyée
+    func reconcileWithFirestore() async -> Bool {
+        Logger.log("🔄 === RÉCONCILIATION TrackingManager avec Firestore ===", category: .session)
+        
+        guard let userId = AuthService.shared.currentUserId else {
+            Logger.log("ℹ️ Pas d'utilisateur connecté, pas de réconciliation nécessaire", category: .session)
+            return false
+        }
+        
+        // Cas 1 : Pas de session locale active
+        guard let localSession = activeTrackingSession else {
+            Logger.log("✅ Aucune session locale active, état cohérent", category: .session)
+            return false
+        }
+        
+        let sessionId = localSession.realId
+        Logger.log("🔍 Session locale détectée: \(sessionId)", category: .session)
+        Logger.log("   - État local: \(trackingState.displayName)", category: .session)
+        Logger.log("   - Durée écoulée: \(Int(currentDuration))s", category: .session)
+        
+        // Cas 2 : Vérifier l'état dans Firestore
+        do {
+            if let firestoreSession = try await SessionService.shared.getSession(sessionId: sessionId) {
+                Logger.log("📡 Session trouvée dans Firestore:", category: .session)
+                Logger.log("   - Status Firestore: \(firestoreSession.status.rawValue)", category: .session)
+                
+                // Cas 2a : Session terminée dans Firestore mais active en local
+                if firestoreSession.status == .ended {
+                    Logger.log("⚠️ INCOHÉRENCE: Session terminée dans Firestore mais active localement", category: .session)
+                    Logger.log("   → Nettoyage de l'état local", category: .session)
+                    await resetTracking(reason: "Session terminée dans Firestore")
+                    return true
+                }
+                
+                // Cas 2b : Session active/paused - Vérifier le timeout (> 4h)
+                let elapsed = Date().timeIntervalSince(firestoreSession.startedAt)
+                if elapsed > 14400 {  // 4 heures
+                    Logger.log("⚠️ Session zombie détectée (active depuis \(String(format: "%.1f", elapsed / 3600))h)", category: .session)
+                    Logger.log("   → Terminaison forcée", category: .session)
+                    
+                    // Terminer dans Firestore
+                    try? await SessionService.shared.endSession(sessionId: sessionId)
+                    
+                    // Nettoyer l'état local
+                    await resetTracking(reason: "Timeout 4h dépassé")
+                    return true
+                }
+                
+                // Cas 2c : Tout est OK
+                Logger.log("✅ Session cohérente entre local et Firestore", category: .session)
+                return false
+                
+            } else {
+                // Cas 3 : Session introuvable dans Firestore
+                Logger.log("⚠️ Session locale introuvable dans Firestore (supprimée ?)", category: .session)
+                Logger.log("   → Nettoyage de l'état local", category: .session)
+                await resetTracking(reason: "Session introuvable dans Firestore")
+                return true
+            }
+        } catch {
+            Logger.logError(error, context: "reconcileWithFirestore", category: .session)
+            
+            // En cas d'erreur réseau, on ne nettoie PAS (pour éviter de perdre une session valide)
+            Logger.log("⚠️ Erreur réseau - Conservation de l'état local par sécurité", category: .session)
+            return false
+        }
+    }
+    
+    /// 🧹 Réinitialise complètement l'état du TrackingManager
+    ///
+    /// **ATTENTION :** Cette méthode arrête tout tracking en cours sans sauvegarder.
+    /// À n'utiliser QUE pour nettoyer un état incohérent.
+    ///
+    /// - Parameter reason: Raison du reset (pour les logs)
+    private func resetTracking(reason: String) async {
+        Logger.log("🧹 Réinitialisation TrackingManager - Raison: \(reason)", category: .session)
+        
+        // Arrêter le GPS
+        locationProvider.stopUpdating()
+        
+        // Arrêter les timers
+        durationTimer?.invalidate()
+        durationTimer = nil
+        
+        // Annuler la sauvegarde automatique
+        autoSaveTask?.cancel()
+        autoSaveTask = nil
+        
+        // Réinitialiser l'état
+        activeTrackingSession = nil
+        trackingState = .idle
+        sessionStartTime = nil
+        pausedTime = nil
+        totalPausedDuration = 0
+        currentDistance = 0
+        currentDuration = 0
+        currentSpeed = 0
+        lastLocation = nil
+        routeCoordinates = []
+        otherRunnersRoutes = [:]
+        
+        // Nettoyer le buffer
+        pointsLock.lock()
+        pendingRoutePoints.removeAll()
+        pointsLock.unlock()
+        
+        Logger.logSuccess("✅ TrackingManager réinitialisé", category: .session)
+    }
+    
     // MARK: - Start Tracking
     
     /// Démarre le tracking pour une session
@@ -115,6 +242,8 @@ class TrackingManager: ObservableObject {
         Logger.log("[AUDIT-TM-01] 🚀 TrackingManager.startTracking appelé", category: .location)
         Logger.log("[AUDIT-TM-01-DEBUG] 📋 Session reçue:", category: .location)
         Logger.log("   - id: \(session.id ?? "NIL")", category: .location)
+        Logger.log("   - manualId: \(session.manualId ?? "NIL")", category: .location)
+        Logger.log("   - realId: \(session.realId)", category: .location)
         Logger.log("   - squadId: \(session.squadId)", category: .location)
         Logger.log("   - creatorId: \(session.creatorId)", category: .location)
         Logger.log("   - status: \(session.status.rawValue)", category: .location)
@@ -125,8 +254,10 @@ class TrackingManager: ObservableObject {
             return false
         }
         
-        guard let sessionId = session.id else {
-            Logger.log("❌❌ ERREUR CRITIQUE : Session ID est NIL", category: .location)
+        // 🔥 FIX : Utiliser realId au lieu de id pour gérer les deux cas (@DocumentID et manualId)
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT" else {
+            Logger.log("❌❌ ERREUR CRITIQUE : Session ID est manquant", category: .location)
             Logger.log("   - Cela signifie que la session n'a pas été chargée depuis Firestore", category: .location)
             Logger.log("   - Vérifier que la vue passe bien une session avec un ID valide", category: .location)
             return false
@@ -311,7 +442,9 @@ class TrackingManager: ObservableObject {
             return
         }
         
-        guard let sessionId = session.id else {
+        // 🔥 FIX : Utiliser realId au lieu de id
+        let sessionId = session.realId
+        guard sessionId != "ID_MANQUANT" else {
             Logger.log("[AUDIT-TM-STOP-03] ❌ Session ID manquant", category: .location)
             throw TrackingError.invalidSession
         }

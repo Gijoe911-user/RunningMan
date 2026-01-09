@@ -159,6 +159,9 @@ class SessionService {
     func joinSession(sessionId: String, userId: String) async throws {
         let sessionRef = db.collection("sessions").document(sessionId)
         
+        // ✅ FIX: Utiliser Date() au lieu de serverTimestamp pour éviter les erreurs de décodage
+        let now = Date()
+        
         // 🚀 Fire-and-forget pour l'ajout du participant
         Task { @MainActor in
             do {
@@ -166,10 +169,10 @@ class SessionService {
                     "participants": FieldValue.arrayUnion([userId]),
                     // 🆕 Initialiser l'état du nouveau participant comme "waiting" (spectateur)
                     "participantStates.\(userId).status": ParticipantStatus.waiting.rawValue,
-                    // 🆕 Initialiser l'activité du participant (spectateur, pas de tracking)
-                    "participantActivity.\(userId).lastUpdate": FieldValue.serverTimestamp(),
+                    // ✅ FIX: Utiliser Date() au lieu de serverTimestamp
+                    "participantActivity.\(userId).lastUpdate": now,
                     "participantActivity.\(userId).isTracking": false,
-                    "updatedAt": FieldValue.serverTimestamp()
+                    "updatedAt": now
                 ])
                 Logger.log("✅ Participant ajouté à la session", category: .service)
             } catch {
@@ -255,7 +258,10 @@ class SessionService {
             return nil
         }
         
-        let session = try document.data(as: SessionModel.self)
+        var session = try document.data(as: SessionModel.self)
+        // 🔥 FORCE l'injection de l'ID - Double sécurité
+        session.id = document.documentID
+        session.manualId = document.documentID
         Logger.log("🏁 Course active détectée: \(session.id ?? "unknown")", category: .service)
         return session
     }
@@ -277,7 +283,11 @@ class SessionService {
             return nil
         }
         
-        return try document.data(as: SessionModel.self)
+        var session = try document.data(as: SessionModel.self)
+        // 🔥 FORCE l'injection de l'ID - Double sécurité
+        session.id = document.documentID
+        session.manualId = document.documentID
+        return session
     }
     
     // MARK: - Get Session
@@ -291,7 +301,10 @@ class SessionService {
             return nil
         }
         
-        let session = try document.data(as: SessionModel.self)
+        var session = try document.data(as: SessionModel.self)
+        // 🔥 FORCE l'injection de l'ID - Double sécurité
+        session.id = document.documentID
+        session.manualId = document.documentID
         Logger.log("✅ Session récupérée: \(sessionId)", category: .service)
         return session
     }
@@ -558,7 +571,7 @@ class SessionService {
         try await sessionRef.updateData([
             "participantStates.\(userId).status": ParticipantStatus.active.rawValue,
             "participantStates.\(userId).pausedDuration": totalPausedDuration,
-            "participantStates.\(userId).lastPausedAt": FieldValue.delete(), // Supprimer lastPausedAt
+            "participantStates.\(userId).lastPausedAt": NSNull(), // Supprimer lastPausedAt
             "updatedAt": FieldValue.serverTimestamp()
         ])
         
@@ -884,6 +897,198 @@ class SessionService {
         }
     }
     
+    // MARK: - Maintenance & Cleanup
+    
+    /// 🧹 Nettoie les sessions corrompues ou zombies d'un squad
+    ///
+    /// **Cas d'usage :**
+    /// - Sessions avec erreurs de décodage (champs manquants)
+    /// - Sessions "zombies" actives depuis > 4 heures
+    /// - Synchronisation du champ `hasActiveSessions` du squad
+    ///
+    /// **Utilisation :**
+    /// - Appeler depuis un bouton admin dans l'UI
+    /// - Appeler automatiquement au démarrage de l'app (optionnel)
+    /// - Déclencher via Cloud Function Firebase (recommandé pour production)
+    ///
+    /// - Parameter squadId: ID du squad à nettoyer
+    /// - Returns: Nombre de sessions nettoyées
+    /// - Throws: Erreur Firestore en cas d'échec
+    @discardableResult
+    func cleanupCorruptedSessions(squadId: String) async throws -> Int {
+        Logger.log("🧹 Démarrage nettoyage sessions pour squad: \(squadId)", category: .service)
+        
+        var cleanedCount = 0
+        let fourHoursAgo = Date().addingTimeInterval(-14400)  // 4 heures
+        
+        // 1. Récupérer TOUTES les sessions non terminées
+        let allSessions = try await db.collection("sessions")
+            .whereField("squadId", isEqualTo: squadId)
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,
+                SessionStatus.active.rawValue,
+                SessionStatus.paused.rawValue
+            ])
+            .getDocuments()
+        
+        Logger.log("📋 \(allSessions.documents.count) session(s) non terminée(s) trouvée(s)", category: .service)
+        
+        for doc in allSessions.documents {
+            // Cas 1: Session corrompue (impossible à décoder)
+            guard let session = try? doc.data(as: SessionModel.self) else {
+                Logger.log("⚠️ Session corrompue détectée: \(doc.documentID)", category: .service)
+                
+                // Option A: Supprimer (plus sûr pour éviter les bugs)
+                try await doc.reference.delete()
+                Logger.log("🗑️ Session \(doc.documentID) supprimée (corrompue)", category: .service)
+                cleanedCount += 1
+                
+                // Option B: Tenter de réparer (décommenter si préféré)
+                // try await doc.reference.updateData([
+                //     "status": SessionStatus.ended.rawValue,
+                //     "endedAt": FieldValue.serverTimestamp()
+                // ])
+                
+                continue
+            }
+            
+            // Cas 2: Session zombie (active depuis > 4h)
+            if session.startedAt < fourHoursAgo {
+                let elapsedHours = Date().timeIntervalSince(session.startedAt) / 3600
+                Logger.log("⏱️ Session zombie détectée: \(doc.documentID) (active depuis \(String(format: "%.1f", elapsedHours))h)", category: .service)
+                
+                try await doc.reference.updateData([
+                    "status": SessionStatus.ended.rawValue,
+                    "endedAt": FieldValue.serverTimestamp(),
+                    "durationSeconds": session.startedAt.distance(to: Date())
+                ])
+                Logger.log("✅ Session zombie terminée: \(doc.documentID)", category: .service)
+                cleanedCount += 1
+            }
+            
+            // Cas 3: Session avec ID manquant (ne devrait pas arriver mais...)
+            if session.realId == "ID_MANQUANT" {
+                Logger.log("⚠️ Session avec ID manquant détectée: \(doc.documentID)", category: .service)
+                
+                // Forcer l'ID dans Firestore (ne devrait pas être nécessaire normalement)
+                // La suppression est plus sûre
+                try await doc.reference.delete()
+                Logger.log("🗑️ Session \(doc.documentID) supprimée (ID manquant)", category: .service)
+                cleanedCount += 1
+            }
+        }
+        
+        // 2. Synchroniser le champ hasActiveSessions du squad
+        let remainingActiveSessions = try await getActiveSessions(squadId: squadId)
+        let hasActiveSessions = !remainingActiveSessions.isEmpty
+        
+        try await db.collection("squads").document(squadId).updateData([
+            "hasActiveSessions": hasActiveSessions
+        ])
+        
+        Logger.logSuccess("✅ Nettoyage terminé: \(cleanedCount) session(s) nettoyée(s), \(remainingActiveSessions.count) session(s) active(s) restante(s)", category: .service)
+        
+        // Invalider le cache pour forcer le rechargement
+        invalidateCache(squadId: squadId)
+        
+        return cleanedCount
+    }
+    
+    /// 🔄 Détecte les sessions zombies (actives depuis > 4h) pour un squad
+    ///
+    /// Version lecture seule sans modification. Utile pour afficher un badge
+    /// "X sessions à nettoyer" dans l'UI.
+    ///
+    /// - Parameter squadId: ID du squad à vérifier
+    /// - Returns: Liste des IDs de sessions zombies
+    func detectZombieSessions(squadId: String) async throws -> [String] {
+        let fourHoursAgo = Date().addingTimeInterval(-14400)
+        
+        let zombies = try await db.collection("sessions")
+            .whereField("squadId", isEqualTo: squadId)
+            .whereField("status", in: [
+                SessionStatus.scheduled.rawValue,
+                SessionStatus.active.rawValue,
+                SessionStatus.paused.rawValue
+            ])
+            .getDocuments()
+        
+        let zombieIds = zombies.documents.compactMap { doc -> String? in
+            guard let session = try? doc.data(as: SessionModel.self),
+                  session.startedAt < fourHoursAgo else {
+                return nil
+            }
+            return doc.documentID
+        }
+        
+        return zombieIds
+    }
+    
+    /// 🔍 Affiche un diagnostic détaillé d'une session
+    ///
+    /// Utile pour déboguer les problèmes de synchronisation ou d'état.
+    ///
+    /// - Parameter sessionId: ID de la session à diagnostiquer
+    func diagnoseSession(sessionId: String) async {
+        Logger.log("🔍 === DIAGNOSTIC SESSION: \(sessionId) ===", category: .service)
+        
+        do {
+            let doc = try await db.collection("sessions").document(sessionId).getDocument()
+            
+            guard doc.exists else {
+                Logger.log("❌ Session introuvable dans Firestore", category: .service)
+                return
+            }
+            
+            // Tenter de décoder
+            if let session = try? doc.data(as: SessionModel.self) {
+                Logger.log("✅ Session décodée avec succès", category: .service)
+                Logger.log("   - ID: \(session.id ?? "NIL")", category: .service)
+                Logger.log("   - manualId: \(session.manualId ?? "NIL")", category: .service)
+                Logger.log("   - realId: \(session.realId)", category: .service)
+                Logger.log("   - squadId: \(session.squadId)", category: .service)
+                Logger.log("   - status: \(session.status.rawValue)", category: .service)
+                Logger.log("   - creatorId: \(session.creatorId)", category: .service)
+                Logger.log("   - participants: \(session.participants.count)", category: .service)
+                Logger.log("   - startedAt: \(session.startedAt)", category: .service)
+                
+                let elapsed = Date().timeIntervalSince(session.startedAt)
+                Logger.log("   - Temps écoulé: \(String(format: "%.1f", elapsed / 3600))h", category: .service)
+                
+                if let states = session.participantStates {
+                    Logger.log("   - participantStates: \(states.count) entrée(s)", category: .service)
+                    for (userId, state) in states {
+                        Logger.log("     • \(userId): \(state.status.rawValue)", category: .service)
+                    }
+                }
+                
+                if let activity = session.participantActivity {
+                    Logger.log("   - participantActivity: \(activity.count) entrée(s)", category: .service)
+                    for (userId, act) in activity {
+                        Logger.log("     • \(userId): tracking=\(act.isTracking), lastUpdate=\(act.lastUpdate)", category: .service)
+                    }
+                }
+                
+                // Vérifier si zombie
+                if elapsed > 14400 && session.status != .ended {
+                    Logger.log("⚠️ SESSION ZOMBIE détectée (active depuis > 4h)", category: .service)
+                }
+            } else {
+                Logger.log("❌ Erreur de décodage SessionModel", category: .service)
+                Logger.log("   📄 Données brutes Firestore:", category: .service)
+                if let data = doc.data() {
+                    for (key, value) in data {
+                        Logger.log("     - \(key): \(value)", category: .service)
+                    }
+                }
+            }
+        } catch {
+            Logger.logError(error, context: "diagnoseSession", category: .service)
+        }
+        
+        Logger.log("🔍 === FIN DIAGNOSTIC ===", category: .service)
+    }
+    
     // MARK: - Get Active Session
     
     /// Récupère la session active pour un squad donné (requête unique)
@@ -908,7 +1113,10 @@ class SessionService {
         }
         
         do {
-            let session = try doc.data(as: SessionModel.self)
+            var session = try doc.data(as: SessionModel.self)
+            // 🔥 FORCE l'injection de l'ID - Double sécurité
+            session.id = doc.documentID
+            session.manualId = doc.documentID
             Logger.log("✅ Session active trouvée: \(session.id ?? "unknown")", category: .service)
             return session
         } catch {
@@ -931,7 +1139,13 @@ class SessionService {
                 ])
             
             let listener = query.addSnapshotListener { snapshot, _ in
-                let sessions = snapshot?.documents.compactMap { try? $0.data(as: SessionModel.self) } ?? []
+                let sessions = snapshot?.documents.compactMap { doc -> SessionModel? in
+                    guard var session = try? doc.data(as: SessionModel.self) else { return nil }
+                    // 🔥 FORCE l'injection de l'ID - Double sécurité
+                    session.id = doc.documentID
+                    session.manualId = doc.documentID
+                    return session
+                } ?? []
                 continuation.yield(sessions)
             }
             continuation.onTermination = { _ in listener.remove() }
@@ -956,7 +1170,10 @@ class SessionService {
                     return
                 }
                 
-                if let session = try? snapshot.data(as: SessionModel.self) {
+                if var session = try? snapshot.data(as: SessionModel.self) {
+                    // 🔥 FORCE l'injection de l'ID - Double sécurité
+                    session.id = snapshot.documentID
+                    session.manualId = snapshot.documentID
                     Logger.log("🔄 Session \(sessionId) mise à jour", category: .service)
                     continuation.yield(session)
                 } else {
@@ -999,17 +1216,23 @@ class SessionService {
                     print("   🔑 Document ID depuis Firestore: \(doc.documentID)")
                     
                     do {
-                        let session = try doc.data(as: SessionModel.self)
+                        var session = try doc.data(as: SessionModel.self)
+                        
+                        // 🔥 FORCE l'injection de l'ID - Double sécurité
+                        session.id = doc.documentID
+                        session.manualId = doc.documentID
+                        
                         print("✅ Session décodée:")
                         print("   - ID après décodage: \(session.id ?? "❌ NIL")")
+                        print("   - manualId après décodage: \(session.manualId ?? "❌ NIL")")
+                        print("   - realId: \(session.realId)")
                         print("   - Document ID: \(doc.documentID)")
                         print("   - Status: \(session.status.rawValue)")
                         
-                        if session.id == nil {
-                            print("⚠️⚠️ PROBLÈME : L'ID est NIL après décodage !")
+                        if session.id == nil && session.manualId == nil {
+                            print("⚠️⚠️ PROBLÈME CRITIQUE : Les deux IDs sont NIL après décodage !")
                             print("   - Firebase a fourni l'ID: \(doc.documentID)")
-                            print("   - Mais @DocumentID ne l'a pas capturé")
-                            print("   - Vérifier SessionModel.CodingKeys")
+                            print("   - Mais ni @DocumentID ni manualId n'ont fonctionné")
                         }
                         
                         continuation.yield(session)
@@ -1053,10 +1276,13 @@ class SessionService {
         let snapshot = try await query.getDocuments()
         
         // ✅ Filtrer silencieusement les sessions avec erreur de décodage
-        // @DocumentID gère automatiquement l'assignation de l'ID
+        // 🔥 FIX: Forcer l'injection de l'ID après décodage
         let sessions = snapshot.documents.compactMap { doc -> SessionModel? in
             do {
-                let session = try doc.data(as: SessionModel.self)
+                var session = try doc.data(as: SessionModel.self)
+                // 🔥 FORCE l'injection de l'ID - Double sécurité
+                session.id = doc.documentID
+                session.manualId = doc.documentID
                 return session
             } catch {
                 Logger.log("⚠️ Session HISTORIQUE \(doc.documentID) ignorée (erreur décodage): \(error.localizedDescription)", category: .service)
@@ -1095,10 +1321,13 @@ class SessionService {
         let snapshot = try await query.getDocuments()
         
         // ✅ Filtrer silencieusement les sessions avec erreur de décodage
-        // @DocumentID gère automatiquement l'assignation de l'ID
+        // 🔥 FIX: Forcer l'injection de l'ID après décodage
         let sessions = snapshot.documents.compactMap { doc -> SessionModel? in
             do {
-                let session = try doc.data(as: SessionModel.self)
+                var session = try doc.data(as: SessionModel.self)
+                // 🔥 FORCE l'injection de l'ID - Double sécurité
+                session.id = doc.documentID
+                session.manualId = doc.documentID
                 return session
             } catch {
                 Logger.log("⚠️ Session \(doc.documentID) ignorée (erreur décodage): \(error.localizedDescription)", category: .service)
@@ -1123,7 +1352,13 @@ class SessionService {
             .limit(to: limit)
         
         let snapshot = try await query.getDocuments()
-        let sessions = snapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
+        let sessions = snapshot.documents.compactMap { doc -> SessionModel? in
+            guard var session = try? doc.data(as: SessionModel.self) else { return nil }
+            // 🔥 FORCE l'injection de l'ID - Double sécurité
+            session.id = doc.documentID
+            session.manualId = doc.documentID
+            return session
+        }
         
         Logger.logSuccess("✅ \(sessions.count) sessions totales récupérées", category: .service)
         return sessions
@@ -1159,7 +1394,13 @@ class SessionService {
             .order(by: "startedAt", descending: true)
             .getDocuments()
         
-        let sessions = sessionsSnapshot.documents.compactMap { try? $0.data(as: SessionModel.self) }
+        let sessions = sessionsSnapshot.documents.compactMap { doc -> SessionModel? in
+            guard var session = try? doc.data(as: SessionModel.self) else { return nil }
+            // 🔥 FORCE l'injection de l'ID - Double sécurité
+            session.id = doc.documentID
+            session.manualId = doc.documentID
+            return session
+        }
         
         Logger.logSuccess("✅ \(sessions.count) sessions actives trouvées (scheduled/active/paused)", category: .service)
         return sessions
