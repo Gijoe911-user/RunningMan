@@ -415,6 +415,7 @@ struct SessionsListView: View {
         }
         
         var allActiveSessions: [SessionModel] = []
+        var allScheduledSessions: [SessionModel] = []
         var allHistorySessions: [SessionModel] = []
         
         // Parcourir toutes les squads de l'utilisateur
@@ -423,11 +424,11 @@ struct SessionsListView: View {
             
             do {
                 // 1️⃣ Récupérer les sessions actives
-                let activeSessions = try await SessionService.shared.getActiveSessions(squadId: squadId)
+                let activeSessions = try await SessionService.shared.fetchActiveSessions(for: squadId)
                 allActiveSessions.append(contentsOf: activeSessions)
                 
                 // 2️⃣ Récupérer l'historique
-                let history = try await SessionService.shared.getSessionHistory(squadId: squadId)
+                let history = try await SessionService.shared.fetchSessionHistory(for: squadId)
                 allHistorySessions.append(contentsOf: history)
                 
             } catch {

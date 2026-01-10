@@ -1467,3 +1467,27 @@ func withTimeout<T>(seconds: TimeInterval, operation: @escaping @Sendable () asy
         return result
     }
 }
+
+// MARK: - Session Query Extensions
+
+/// Extension pour exposer explicitement les méthodes de requête
+/// (Workaround pour les problèmes de cache du compilateur)
+@MainActor
+extension SessionService {
+    
+    /// Récupère les sessions actives d'une squad
+    /// - Parameter squadId: ID de la squad
+    /// - Returns: Liste des sessions actives (scheduled, active, paused)
+    func fetchActiveSessions(for squadId: String) async throws -> [SessionModel] {
+        return try await getActiveSessions(squadId: squadId)
+    }
+    
+    /// Récupère l'historique des sessions d'une squad
+    /// - Parameters:
+    ///   - squadId: ID de la squad
+    ///   - limit: Nombre maximum de sessions (défaut: 50)
+    /// - Returns: Liste des sessions terminées
+    func fetchSessionHistory(for squadId: String, limit: Int = 50) async throws -> [SessionModel] {
+        return try await getSessionHistory(squadId: squadId, limit: limit)
+    }
+}

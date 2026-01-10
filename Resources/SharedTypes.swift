@@ -8,6 +8,58 @@
 import Foundation
 import CoreLocation
 
+
+/// Options de partage pour les messages et notifications
+enum SharingScope: String, Codable, CaseIterable, Identifiable {
+    case allMySquads = "all_my_squads"
+    case allMySessions = "all_my_sessions"
+    case onlyOne = "only_one"
+    
+    var id: String { rawValue }
+    
+    var displayName: String {
+        switch self {
+        case .allMySquads:
+            return "Toute ma Squad"
+        case .allMySessions:
+            return "Ma session active"
+        case .onlyOne:
+            return "Un seul participant"
+        }
+    }
+    
+    var icon: String {
+        switch self {
+        case .allMySquads:
+            return "person.3.fill"
+        case .allMySessions:
+            return "figure.run.circle.fill"
+        case .onlyOne:
+            return "person.fill"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .allMySquads:
+            return "Envoyer à tous les membres de ma Squad"
+        case .allMySessions:
+            return "Envoyer à tous les participants de ma session active"
+        case .onlyOne:
+            return "Envoyer à un participant spécifique"
+        }
+    }
+}
+
+/// Préférence de lecture automatique des messages
+struct MessageReadingPreference: Codable {
+    var autoReadDuringTracking: Bool = true  // Lire automatiquement pendant le tracking
+    var autoReadVoiceMessages: Bool = true   // Lire les messages vocaux
+    var autoReadTextMessages: Bool = true    // Lire les messages texte
+    var doNotDisturbMode: Bool = false       // Mode "bulle de course"
+}
+
+
 // MARK: - RunnerLocation
 /// Position d'un runner en temps réel
 struct RunnerLocation: Identifiable, Codable, Equatable {

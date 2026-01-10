@@ -38,7 +38,7 @@ class SessionRecoveryManager: ObservableObject {
     
     /// Vérifie s'il existe une session interrompue pour l'utilisateur
     func checkForInterruptedSession() async {
-        guard let userId = authService.currentUserId else {
+        guard authService.currentUserId != nil else {
             Logger.log("⚠️ Pas d'utilisateur connecté pour vérifier les sessions interrompues", category: .session)
             return
         }
@@ -50,6 +50,7 @@ class SessionRecoveryManager: ObservableObject {
         Logger.log("ℹ️ Vérification des sessions interrompues (à implémenter)", category: .session)
         
         /* CODE À RÉACTIVER QUAND getUserActiveSessions SERA IMPLÉMENTÉ :
+        guard let userId = authService.currentUserId else { return }
         do {
             let sessions = try await sessionService.getUserActiveSessions(userId: userId)
             

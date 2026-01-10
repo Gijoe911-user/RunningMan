@@ -11,6 +11,7 @@ import SwiftUI
 struct MainTabView: View {
     
     @Environment(AppState.self) private var appState
+    @StateObject private var voiceMessageService = VoiceMessageService.shared
     
     var body: some View {
         // ✅ @Bindable permet de créer un binding depuis un @Observable
@@ -18,8 +19,8 @@ struct MainTabView: View {
         
         ZStack {
             TabView(selection: $appState.selectedTab) {
-                // Onglet 0 : Dashboard
-                DashboardView()
+                // Onglet 0 : Dashboard (avec onboarding intégré)
+                HomeWelcomeView()
                     .tabItem {
                         Label("Accueil", systemImage: "house.fill")
                     }
@@ -39,12 +40,20 @@ struct MainTabView: View {
                     }
                     .tag(2)
                 
-                // Onglet 3 : Profil
+                // 🆕 Onglet 3 : Centre de Notifications (NOUVEAU)
+                NotificationCenterView()
+                    .tabItem {
+                        Label("Notifications", systemImage: "bell.fill")
+                    }
+                    .badge(voiceMessageService.unreadMessages.count)
+                    .tag(3)
+                
+                // Onglet 4 : Profil
                 ProfileView()
                     .tabItem {
                         Label("Profil", systemImage: "person.fill")
                     }
-                    .tag(3)
+                    .tag(4)
             }
             .tint(.coralAccent) // Couleur des icônes sélectionnées
             
