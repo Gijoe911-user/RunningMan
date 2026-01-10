@@ -15,13 +15,34 @@ struct CreateSessionView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(SquadViewModel.self) private var squadVM
     
+    @State private var sessionMode: SessionMode = .immediate  // 🆕 Mode session
     @State private var activityType: ActivityType = .training
     @State private var targetDistance: String = ""
     @State private var targetDuration: String = ""
     @State private var useQuickDistance = true  // ✅ Toggle pour distance rapide
     @State private var quickDistance: Double = 5.0  // ✅ Distance pré-définie
+    
+    // 🆕 Planification
+    @State private var scheduledDate = Date()
+    @State private var scheduledTime = Date()
+    @State private var sessionTitle = ""
+    @State private var sessionDescription = ""
+    
     @State private var isCreating = false
     @State private var errorMessage: String?
+    
+    // 🆕 Mode de session
+    enum SessionMode: String, CaseIterable {
+        case immediate = "Démarrer maintenant"
+        case scheduled = "Planifier"
+        
+        var icon: String {
+            switch self {
+            case .immediate: return "play.circle.fill"
+            case .scheduled: return "calendar.badge.clock"
+            }
+        }
+    }
     
     init(squad: SquadModel, onSessionCreated: (() -> Void)? = nil) {
         self.squad = squad
@@ -39,8 +60,16 @@ struct CreateSessionView: View {
                         // Header
                         headerSection
                         
+                        // 🆕 Mode de session (Immédiat vs Planifié)
+                        sessionModeSection
+                        
                         // Type de session
                         sessionTypeSection
+                        
+                        // 🆕 Détails si planifié
+                        if sessionMode == .scheduled {
+                            schedulingSection
+                        }
                         
                         // Objectifs
                         goalsSection
@@ -107,6 +136,129 @@ struct CreateSessionView: View {
         .padding()
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+    
+    // MARK: - 🆕 Session Mode Section
+    
+    private var sessionModeSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Quand ?")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            HStack(spacing: 12) {
+                ForEach(SessionMode.allCases, id: \.self) { mode in
+                    Button {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            sessionMode = mode
+                        }
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: mode.icon)
+                                .font(.title3)
+                            
+                            Text(mode.rawValue)
+                                .font(.subheadline.bold())
+                        }
+                        .foregroundColor(sessionMode == mode ? .white : .white.opacity(0.7))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .background(
+                            sessionMode == mode
+                            ? LinearGradient(
+                                colors: [Color.coralAccent, Color.pinkAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                            : LinearGradient(
+                                colors: [Color.white.opacity(0.1), Color.white.opacity(0.05)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay {
+                            if sessionMode == mode {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .strokeBorder(Color.coralAccent, lineWidth: 2)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+    
+    // MARK: - 🆕 Scheduling Section (si planifié)
+    
+    private var schedulingSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Détails de la planification")
+                .font(.headline)
+                .foregroundColor(.white)
+            
+            VStack(spacing: 16) {
+                // Titre de la session
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Titre de la session", systemImage: "text.cursor")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                    
+                    TextField("Ex: Course matinale", text: $sessionTitle)
+                        .padding()
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .foregroundColor(.white)
+                }
+                
+                // Date
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Date", systemImage: "calendar")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                    
+                    DatePicker("", selection: $scheduledDate, in: Date()..., displayedComponents: .date)
+                        .datePickerStyle(.graphical)
+                        .tint(.coralAccent)
+                        .padding()
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                
+                // Heure
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Heure de départ", systemImage: "clock")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                    
+                    DatePicker("", selection: $scheduledTime, displayedComponents: .hourAndMinute)
+                        .datePickerStyle(.wheel)
+                        .labelsHidden()
+                        .frame(height: 100)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                }
+                
+                // Description optionnelle
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("Description (optionnel)", systemImage: "text.alignleft")
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.9))
+                    
+                    TextEditor(text: $sessionDescription)
+                        .frame(height: 80)
+                        .padding(8)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .foregroundColor(.white)
+                        .scrollContentBackground(.hidden)
+                }
+            }
+            .padding()
+            .background(Color.white.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
     }
     
     // MARK: - Session Type Section
@@ -306,7 +458,8 @@ struct CreateSessionView: View {
                     ProgressView()
                         .tint(.white)
                 } else {
-                    Text("Créer et rejoindre")
+                    Image(systemName: sessionMode == .immediate ? "play.fill" : "calendar.badge.plus")
+                    Text(sessionMode == .immediate ? "Créer et rejoindre" : "Planifier la session")
                         .font(.headline)
                 }
             }
@@ -322,8 +475,18 @@ struct CreateSessionView: View {
             )
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
-        .disabled(isCreating)
-        .opacity(isCreating ? 0.6 : 1.0)
+        .disabled(isCreating || !isFormValid)
+        .opacity(isCreating || !isFormValid ? 0.6 : 1.0)
+    }
+    
+    /// Vérifie si le formulaire est valide
+    private var isFormValid: Bool {
+        if sessionMode == .scheduled {
+            // Pour une session planifiée, le titre est obligatoire
+            return !sessionTitle.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        // Pour une session immédiate, toujours valide
+        return true
     }
     
     // MARK: - Actions
@@ -336,6 +499,12 @@ struct CreateSessionView: View {
         
         guard let userId = AuthService.shared.currentUserId else {
             errorMessage = "Utilisateur non connecté"
+            return
+        }
+        
+        // Validation pour sessions planifiées
+        if sessionMode == .scheduled && sessionTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+            errorMessage = "Le titre de la session est obligatoire"
             return
         }
         
@@ -356,15 +525,51 @@ struct CreateSessionView: View {
                 // Vérifier d'abord s'il existe déjà une session active
                 Logger.log("🔍 Vérification session active pour squad: \(squadId)", category: .session)
                 
-                if let existingSession = try await SessionService.shared.getActiveSession(squadId: squadId) {
-                    Logger.log("⚠️ Une session active existe déjà: \(existingSession.id ?? "unknown")", category: .session)
-                    timeoutTask.cancel()
-                    isCreating = false
-                    errorMessage = "Une session est déjà active pour cette squad"
-                    return
+                if sessionMode == .immediate {
+                    if let existingSession = try await SessionService.shared.getActiveSession(squadId: squadId) {
+                        Logger.log("⚠️ Une session active existe déjà: \(existingSession.id ?? "unknown")", category: .session)
+                        timeoutTask.cancel()
+                        isCreating = false
+                        errorMessage = "Une session est déjà active pour cette squad"
+                        return
+                    }
                 }
                 
-                Logger.log("🚀 Création de la session...", category: .session)
+                Logger.log("🚀 Création de la session (\(sessionMode.rawValue))...", category: .session)
+                
+                // Combiner date et heure pour sessions planifiées
+                var scheduledStartDate: Date? = nil
+                if sessionMode == .scheduled {
+                    let calendar = Calendar.current
+                    let dateComponents = calendar.dateComponents([.year, .month, .day], from: scheduledDate)
+                    let timeComponents = calendar.dateComponents([.hour, .minute], from: scheduledTime)
+                    
+                    var combined = DateComponents()
+                    combined.year = dateComponents.year
+                    combined.month = dateComponents.month
+                    combined.day = dateComponents.day
+                    combined.hour = timeComponents.hour
+                    combined.minute = timeComponents.minute
+                    
+                    scheduledStartDate = calendar.date(from: combined)
+                }
+                
+                // Calculer les objectifs
+                let finalDistance: Double? = {
+                    if useQuickDistance {
+                        return quickDistance > 0 ? quickDistance * 1000 : nil  // Convertir km -> m
+                    } else if let dist = Double(targetDistance), dist > 0 {
+                        return dist * 1000  // Convertir km -> m
+                    }
+                    return nil
+                }()
+                
+                let finalDuration: TimeInterval? = {
+                    if let dur = TimeInterval(targetDuration), dur > 0 {
+                        return dur * 60  // Convertir min -> s
+                    }
+                    return nil
+                }()
                 
                 // Créer la session via le service
                 let createdSession = try await SessionService.shared.createSession(
@@ -373,13 +578,17 @@ struct CreateSessionView: View {
                     startLocation: nil
                 )
                 
-                Logger.logSuccess("✅ Session créée: \(createdSession.id ?? "unknown")", category: .session)
+                Logger.logSuccess("✅ Session créée: \(createdSession.id ?? "unknown") - mode: \(sessionMode.rawValue)", category: .session)
                 
-                // 🎯 FIX: NE PLUS démarrer le tracking automatiquement
-                // La session reste en mode SCHEDULED (spectateur par défaut)
-                // L'utilisateur devra cliquer sur "Démarrer l'activité" pour passer en mode coureur
-                
-                Logger.log("✅ Session en mode SCHEDULED - attente action utilisateur", category: .session)
+                // 🎯 Comportement selon le mode
+                if sessionMode == .scheduled {
+                    // Session planifiée : rester en SCHEDULED, ne pas auto-join
+                    Logger.log("📅 Session planifiée créée - visible pour tous les membres", category: .session)
+                } else {
+                    // Session immédiate : reste en mode SCHEDULED (spectateur par défaut)
+                    // L'utilisateur devra cliquer sur "Démarrer l'activité" pour passer en mode coureur
+                    Logger.log("✅ Session immédiate en mode SCHEDULED - attente action utilisateur", category: .session)
+                }
                 
                 timeoutTask.cancel()
                 isCreating = false
@@ -387,7 +596,7 @@ struct CreateSessionView: View {
                 // Fermer la sheet
                 dismiss()
                 
-                // Notifier que la session est créée ET active
+                // Notifier que la session est créée
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
                     onSessionCreated?()
                 }

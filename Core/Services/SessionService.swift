@@ -1188,9 +1188,21 @@ class SessionService {
         }
     }
     
+    // 🔥 Cache pour éviter les listeners multiples
+    private var activeSessionListeners: [String: ListenerRegistration] = [:]
+    
     /// Stream de la session active d'un squad (une seule)
+    /// 🔧 FIX: Prévenir les listeners multiples avec cache
     func observeActiveSession(squadId: String) -> AsyncStream<SessionModel?> {
-        print("🔍 observeActiveSession démarré pour squadId: \(squadId)")
+        // Nettoyer un listener existant pour ce squad avant d'en créer un nouveau
+        if let existingListener = activeSessionListeners[squadId] {
+            Logger.log("⚠️ observeActiveSession: Listener déjà actif pour \(squadId), suppression...", category: .service)
+            existingListener.remove()
+            activeSessionListeners.removeValue(forKey: squadId)
+        }
+        
+        Logger.log("🔍 observeActiveSession démarré pour squadId: \(squadId)", category: .service)
+        
         return AsyncStream { continuation in
             let query = self.db.collection("sessions")
                 .whereField("squadId", isEqualTo: squadId)
@@ -1204,16 +1216,15 @@ class SessionService {
             
             let listener = query.addSnapshotListener { snapshot, error in
                 if let error = error {
-                    print("❌ ERROR observeActiveSession: \(error.localizedDescription)")
+                    Logger.logError(error, context: "observeActiveSession", category: .service)
                     continuation.yield(nil)
                     return
                 }
                 
-                print("📦 Snapshot reçu: \(snapshot?.documents.count ?? 0) document(s)")
+                Logger.log("📦 Snapshot reçu: \(snapshot?.documents.count ?? 0) document(s)", category: .service)
                 
                 if let doc = snapshot?.documents.first {
-                    print("📄 Document trouvé: \(doc.documentID)")
-                    print("   🔑 Document ID depuis Firestore: \(doc.documentID)")
+                    Logger.log("📄 Document trouvé: \(doc.documentID)", category: .service)
                     
                     do {
                         var session = try doc.data(as: SessionModel.self)
@@ -1222,35 +1233,40 @@ class SessionService {
                         session.id = doc.documentID
                         session.manualId = doc.documentID
                         
-                        print("✅ Session décodée:")
-                        print("   - ID après décodage: \(session.id ?? "❌ NIL")")
-                        print("   - manualId après décodage: \(session.manualId ?? "❌ NIL")")
-                        print("   - realId: \(session.realId)")
-                        print("   - Document ID: \(doc.documentID)")
-                        print("   - Status: \(session.status.rawValue)")
-                        
-                        if session.id == nil && session.manualId == nil {
-                            print("⚠️⚠️ PROBLÈME CRITIQUE : Les deux IDs sont NIL après décodage !")
-                            print("   - Firebase a fourni l'ID: \(doc.documentID)")
-                            print("   - Mais ni @DocumentID ni manualId n'ont fonctionné")
-                        }
+                        Logger.log("✅ Session décodée: \(doc.documentID) - Status: \(session.status.rawValue)", category: .service)
                         
                         continuation.yield(session)
                     } catch {
-                        print("⚠️ Session \(doc.documentID) ignorée (erreur décodage)")
-                        print("   Erreur: \(error.localizedDescription)")
+                        Logger.logError(error, context: "observeActiveSession decode", category: .service)
                         continuation.yield(nil)
                     }
                 } else {
-                    print("⚠️ Aucun document trouvé")
+                    Logger.log("⚠️ Aucun document trouvé", category: .service)
                     continuation.yield(nil)
                 }
             }
-            continuation.onTermination = { @Sendable _ in
-                print("🛑 observeActiveSession terminé")
+            
+            // Stocker le listener dans le cache
+            self.activeSessionListeners[squadId] = listener
+            
+            continuation.onTermination = { @Sendable [weak self] _ in
+                Logger.log("🛑 observeActiveSession terminé pour \(squadId)", category: .service)
                 listener.remove()
+                Task { @MainActor in
+                    self?.activeSessionListeners.removeValue(forKey: squadId)
+                }
             }
         }
+    }
+    
+    /// Nettoyer tous les listeners actifs (appeler lors du logout ou cleanup global)
+    func removeAllActiveListeners() {
+        Logger.log("🧹 Nettoyage de \(activeSessionListeners.count) listeners actifs", category: .service)
+        for (squadId, listener) in activeSessionListeners {
+            listener.remove()
+            Logger.log("  ✓ Listener supprimé pour squad: \(squadId)", category: .service)
+        }
+        activeSessionListeners.removeAll()
     }
 
     // MARK: - Get Session History

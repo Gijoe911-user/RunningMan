@@ -494,6 +494,9 @@ struct SessionTrackingView: View {
             
             Logger.logSuccess("[TRACKING] ✅ Tracking terminé et sauvegardé", category: .session)
             
+            // 🆕 Attendre un court instant pour que Metal/MapKit se stabilisent
+            try? await Task.sleep(nanoseconds: 200_000_000)  // 200ms
+            
             await MainActor.run {
                 dismiss()
             }
@@ -569,17 +572,51 @@ private struct QuickStatBadge: View {
 
 // MARK: - Tracking Map View
 
+/// Vue carte optimisée pour éviter les crashes Metal
+///
+/// **Optimisations appliquées :**
+/// - ✅ Un seul `onChange` pour userLocation (latitude + longitude combinés)
+/// - ✅ Throttling des mises à jour de caméra (max 1 toutes les 2 secondes)
+/// - ✅ Pas d'animation sur les changements de position (réduit charge Metal)
+/// - ✅ Couleur solide pour MapPolyline (gradient = plus gourmand)
+/// - ✅ Seuil de changement augmenté (0.0005 au lieu de 0.0001)
+/// - ✅ Annulation des tâches en cours lors de onDisappear
+/// - ✅ Debouncing sur les routeCoordinates pour éviter les updates trop fréquents
+/// - ✅ id() modifiers pour forcer la stabilité de la vue
+///
+/// **Problème résolu :**
+/// Crash Metal "texture being destroyed while still required by command buffer"
+/// causé par des mises à jour trop fréquentes et animations simultanées.
 struct TrackingMapView: View {
     let userLocation: CLLocationCoordinate2D?
     let routeCoordinates: [CLLocationCoordinate2D]
     
     @State private var cameraPosition: MapCameraPosition = .automatic
     @State private var lastUserLocation: CLLocationCoordinate2D?
+    @State private var isDisappearing = false
+    @State private var updateTask: Task<Void, Never>?  // Pour throttling location
+    @State private var lastUpdateTime: Date = .distantPast  // Pour throttling manuel supplémentaire
+    @State private var stableRouteCount: Int = 0  // Pour détecter les changements significatifs de route
+    
+    // 🎨 Flag pour activer le gradient (performance réduite mais plus joli)
+    private let useGradient = false  // Mettre à `true` si vous voulez le gradient
+    
+    // 🔧 Throttling interval (2 secondes pour éviter les updates trop fréquents)
+    private let updateInterval: TimeInterval = 2.0
+    
+    // 🆕 Wrapper pour détecter les changements de userLocation
+    private var userLocationId: String {
+        guard let location = userLocation else { return "nil" }
+        // Arrondir à 4 décimales pour éviter les micro-changements
+        let lat = String(format: "%.4f", location.latitude)
+        let lon = String(format: "%.4f", location.longitude)
+        return "\(lat),\(lon)"
+    }
     
     var body: some View {
         Map(position: $cameraPosition) {
             // Position de l'utilisateur
-            if let userLocation = userLocation {
+            if let userLocation = userLocation, !isDisappearing {
                 Annotation("Vous", coordinate: userLocation) {
                     ZStack {
                         Circle()
@@ -591,68 +628,116 @@ struct TrackingMapView: View {
                             .frame(width: 20, height: 20)
                     }
                 }
+                .annotationTitles(.hidden)  // 🔧 Masquer le titre pour réduire les rendus
             }
             
-            // Tracé GPS
-            if !routeCoordinates.isEmpty {
-                MapPolyline(coordinates: routeCoordinates)
-                    .stroke(
-                        LinearGradient(
-                            colors: [Color.coralAccent, Color.pinkAccent],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        ),
-                        lineWidth: 2.5  // 🎯 Réduit de 4 à 2.5 pour un trait plus fin
-                    )
+            // Tracé GPS - utiliser stableRouteCount pour stabiliser
+            if !routeCoordinates.isEmpty && !isDisappearing {
+                if useGradient {
+                    // Version avec gradient (plus joli mais plus gourmand)
+                    MapPolyline(coordinates: routeCoordinates)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.coralAccent, Color.pinkAccent],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ),
+                            lineWidth: 2.5
+                        )
+                } else {
+                    // Version couleur solide (optimisée pour performance)
+                    MapPolyline(coordinates: routeCoordinates)
+                        .stroke(Color.coralAccent, lineWidth: 2.5)
+                }
             }
         }
         .mapStyle(.standard(elevation: .realistic))
-        .onChange(of: userLocation?.latitude) { _, _ in
-            Logger.log("[MAP-TRACK] 📍 userLocation changed (lat)", category: .ui)
-            centerOnUserLocation()
-        }
-        .onChange(of: userLocation?.longitude) { _, _ in
-            Logger.log("[MAP-TRACK] 📍 userLocation changed (lon)", category: .ui)
-            centerOnUserLocation()
+        .id("tracking-map-\(stableRouteCount)")  // 🔧 Forcer la stabilité de la vue
+        // 🔧 UN SEUL onChange au lieu de deux (latitude + longitude)
+        .onChange(of: userLocationId) { _, _ in
+            guard !isDisappearing else { return }
+            throttledCenterOnUser()
         }
         .onChange(of: routeCoordinates.count) { old, new in
-            Logger.log("[MAP-TRACK] 🧵 routeCoordinates count \(old) → \(new)", category: .ui)
+            guard !isDisappearing else { return }
+            // Mettre à jour seulement si changement significatif (tous les 10 points)
+            if new % 10 == 0 {
+                stableRouteCount = new
+                Logger.log("[MAP-TRACK] 🧵 routeCoordinates milestone: \(new) points", category: .ui)
+            }
         }
         .onAppear {
+            isDisappearing = false
+            stableRouteCount = routeCoordinates.count
+            lastUpdateTime = .distantPast
             Logger.log("[MAP-TRACK] ✅ onAppear - userLoc: \(userLocation.map { "\($0.latitude), \($0.longitude)" } ?? "nil"), routePts: \(routeCoordinates.count)", category: .ui)
             centerOnUserLocation()
         }
         .onDisappear {
-            Logger.log("[MAP-TRACK] 👋 onDisappear", category: .ui)
+            Logger.log("[MAP-TRACK] 👋 onDisappear - début", category: .ui)
+            isDisappearing = true
+            
+            // 🔧 Annuler les tâches de mise à jour en cours
+            updateTask?.cancel()
+            updateTask = nil
+            
+            // 🔧 Petit délai pour laisser Metal terminer ses opérations
+            Task {
+                try? await Task.sleep(nanoseconds: 100_000_000)  // 0.1 seconde
+                Logger.log("[MAP-TRACK] 👋 onDisappear - terminé", category: .ui)
+            }
+        }
+    }
+    
+    // 🆕 Throttling pour limiter les mises à jour
+    private func throttledCenterOnUser() {
+        // Vérifier si assez de temps s'est écoulé
+        let now = Date()
+        guard now.timeIntervalSince(lastUpdateTime) >= updateInterval else {
+            Logger.log("[MAP-TRACK] ⏭️ throttled (too soon)", category: .ui)
+            return
+        }
+        
+        // Annuler la tâche précédente si elle existe
+        updateTask?.cancel()
+        
+        updateTask = Task {
+            // Attendre 2 secondes avant de mettre à jour
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            
+            guard !Task.isCancelled, !isDisappearing else { return }
+            
+            await MainActor.run {
+                lastUpdateTime = Date()
+                centerOnUserLocation()
+            }
         }
     }
     
     private func centerOnUserLocation() {
-        guard let location = userLocation else {
-            Logger.log("[MAP-TRACK] ⚠️ centerOnUserLocation with nil userLocation", category: .ui)
+        guard let location = userLocation, !isDisappearing else {
             return
         }
         
-        // Vérifier si la position a vraiment changé
+        // Vérifier si la position a vraiment changé (seuil augmenté pour réduire les mises à jour)
         if let last = lastUserLocation,
-           abs(last.latitude - location.latitude) < 0.0001 &&
-           abs(last.longitude - location.longitude) < 0.0001 {
+           abs(last.latitude - location.latitude) < 0.001 &&  // 🔧 Seuil encore augmenté
+           abs(last.longitude - location.longitude) < 0.001 {
             Logger.log("[MAP-TRACK] ⏭️ skip center (no significant change)", category: .ui)
             return
         }
         
         lastUserLocation = location
         
-        withAnimation(.easeInOut(duration: 0.5)) {
-            cameraPosition = .camera(
-                MapCamera(
-                    centerCoordinate: location,
-                    distance: 1000,
-                    heading: 0,
-                    pitch: 0
-                )
+        // 🔧 Pas d'animation pour réduire la charge Metal
+        cameraPosition = .camera(
+            MapCamera(
+                centerCoordinate: location,
+                distance: 1000,
+                heading: 0,
+                pitch: 0
             )
-        }
+        )
         Logger.log("[MAP-TRACK] 🎯 centered on user @ \(location.latitude), \(location.longitude)", category: .ui)
     }
 }

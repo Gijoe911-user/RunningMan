@@ -489,11 +489,12 @@ class TrackingManager: ObservableObject {
             Logger.log("[AUDIT-TM-STOP-14] ⚠️ Firestore échoué, on continue le nettoyage local", category: .location)
         }
         
-        // 6. Nettoyer l'état
-        Logger.log("[AUDIT-TM-STOP-15] 🗑️ Nettoyage de l'état local", category: .location)
+        // 6. Nettoyer l'état (SANS les coordonnées de route pour éviter les problèmes Metal)
+        Logger.log("[AUDIT-TM-STOP-15] 🗑️ Nettoyage de l'état local (stats uniquement)", category: .location)
         trackingState = .idle
         activeTrackingSession = nil
-        routeCoordinates = []
+        // ⚠️ NE PAS effacer routeCoordinates ici → laissé pour la vue
+        // routeCoordinates = []  // 🔥 Commenté pour éviter l'erreur Metal
         currentDistance = 0
         currentDuration = 0
         currentSpeed = 0
@@ -501,6 +502,16 @@ class TrackingManager: ObservableObject {
         sessionStartTime = nil
         totalPausedDuration = 0
         cancellables.removeAll()
+        
+        // 7. Nettoyer les coordonnées après un délai pour laisser SwiftUI/Metal se synchroniser
+        Task {
+            try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
+            await MainActor.run {
+                Logger.log("[AUDIT-TM-STOP-17] 🗑️ Nettoyage différé des coordonnées de carte", category: .location)
+                self.routeCoordinates = []
+                self.otherRunnersRoutes = [:]
+            }
+        }
         
         Logger.logSuccess("[AUDIT-TM-STOP-16] ✅✅ Tracking complètement arrêté", category: .location)
     }

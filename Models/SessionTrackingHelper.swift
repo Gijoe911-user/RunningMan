@@ -8,7 +8,6 @@
 import Foundation
 
 /// Helper pour gérer le démarrage du tracking avec validation de l'ID
-@MainActor
 struct SessionTrackingHelper {
     
     /// Démarre le tracking pour une session en s'assurant qu'elle a un ID valide
@@ -21,9 +20,10 @@ struct SessionTrackingHelper {
     ///   - session: Session à tracker (peut avoir un ID nil)
     ///   - trackingManager: TrackingManager à utiliser
     /// - Returns: `true` si le tracking a démarré, `false` sinon
+    @MainActor
     static func startTracking(
         for session: SessionModel,
-        using trackingManager: TrackingManager = .shared
+        using trackingManager: TrackingManager
     ) async -> Bool {
         
         // 🔍 Cas 1 : La session a déjà un ID valide
@@ -70,9 +70,10 @@ struct SessionTrackingHelper {
     ///   - sessionId: ID de la session (doit être non-nil)
     ///   - trackingManager: TrackingManager à utiliser
     /// - Returns: `true` si le tracking a démarré, `false` sinon
+    @MainActor
     static func startTrackingById(
         _ sessionId: String,
-        using trackingManager: TrackingManager = .shared
+        using trackingManager: TrackingManager
     ) async -> Bool {
         
         Logger.log("🔄 Chargement de la session depuis Firestore: \(sessionId)", category: .location)
@@ -99,6 +100,21 @@ struct SessionTrackingHelper {
 }
 
 // MARK: - Extension pour faciliter l'utilisation
+
+extension SessionTrackingHelper {
+    
+    /// Helper pour appeler startTracking avec TrackingManager.shared depuis les vues
+    @MainActor
+    static func startTrackingWithSharedManager(for session: SessionModel) async -> Bool {
+        await startTracking(for: session, using: TrackingManager.shared)
+    }
+    
+    /// Helper pour appeler startTrackingById avec TrackingManager.shared depuis les vues
+    @MainActor
+    static func startTrackingByIdWithSharedManager(_ sessionId: String) async -> Bool {
+        await startTrackingById(sessionId, using: TrackingManager.shared)
+    }
+}
 
 extension TrackingManager {
     

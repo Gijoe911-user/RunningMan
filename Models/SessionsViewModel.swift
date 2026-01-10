@@ -347,7 +347,7 @@ class SessionsViewModel: NSObject, ObservableObject {
         
         Task {
             if !healthKitManager.isAuthorized {
-                await healthKitManager.requestAuthorization()
+                _ = await healthKitManager.requestAuthorization()
             }
             healthKitManager.startHeartRateQuery(sessionId: sessionId)
             healthKitManager.startPeriodicStatsUpdate(sessionId: sessionId)
